@@ -1,0 +1,5 @@
+bin/
+artifacts/
+*.test
+*.out
+.DS_Store

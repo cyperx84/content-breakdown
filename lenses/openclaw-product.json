@@ -1,0 +1,36 @@
+{
+  "id": "openclaw-product",
+  "name": "OpenClaw Product Lens",
+  "purpose": "Identify source material that can improve OpenClaw as a product, workflow, or system.",
+  "questions": [
+    "Does this improve agent orchestration?",
+    "Does this improve memory or context handling?",
+    "Does this improve eval capability?",
+    "Does this improve tool integration or task flow?",
+    "Is it implementable with current infrastructure?",
+    "Is it differentiated enough to matter?"
+  ],
+  "rankingDimensions": [
+    "strategicFit",
+    "implementationFeasibility",
+    "leverageAcrossWorkflows",
+    "novelty",
+    "urgency"
+  ],
+  "ignoreRules": [
+    "Generic hype with no implementation pattern",
+    "Novelty with no practical leverage",
+    "Ideas already solved well enough internally",
+    "Low-signal content with no downstream artifact value"
+  ],
+  "artifactRules": {
+    "low": ["summary note only"],
+    "medium": ["summary note", "ranked ideas"],
+    "high": ["summary note", "ranked ideas", "PRD seed"]
+  },
+  "projectContextHints": [
+    "openclaw",
+    "agent-army",
+    "personal-os"
+  ]
+}
