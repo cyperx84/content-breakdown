@@ -4,13 +4,24 @@ Content Breakdown Workflow — transforms source material into structured findin
 
 ## Status
 
-**Phase 1 complete. Phase 2 in progress.** Full pipeline working: ingest → extract → lens → emit.
+**Phases 1-5 complete.** Full pipeline working: ingest → extract → lens → emit.
 
-Current output formats:
-- `vault`
-- `summary`
-- `prd`
-- `tasks`
+Source types:
+- YouTube URLs
+- Article / webpage URLs
+- Local files (`.md`, `.txt`, `.pdf`)
+
+Output formats:
+- `vault` — Obsidian-ready full note
+- `summary` — executive summary
+- `prd` — PRD seed doc
+- `tasks` — task list
+
+Lenses:
+- `openclaw-product`
+- `personal-os`
+- `tooling-worth-stealing`
+- `founder-research`
 
 ## Prerequisites
 
@@ -69,20 +80,42 @@ breakdown emit ./artifacts/content-breakdown/2026-03-14_video-title --format tas
 
 ## Commands
 
-### `breakdown run <url>`
+### `breakdown run <url-or-file>`
 
 Full pipeline: ingest → analyze → emit.
 
 Flags:
 - `--lens string` - Lens ID to apply (default: "openclaw-product")
-- `--llm-cmd string` - External LLM command (e.g., 'claude -p')
+- `--llm-cmd string` - External LLM command (e.g., 'claude --print --permission-mode bypassPermissions')
+- `--format string` - Output format: `vault|summary|prd|tasks` (default: `vault`)
 - `--artifacts-dir string` - Artifacts directory (default: ./artifacts/content-breakdown/<slug>/)
-- `--stdout` - Output final markdown note to stdout
+- `--stdout` - Output final note to stdout
 - `--verbose` - Show progress on stderr
 
-### `breakdown ingest <url>`
+### `breakdown batch [file]`
 
-Ingest a source URL and produce `source.json`.
+Run the pipeline over many sources from a file or stdin.
+
+```bash
+# From a file (one URL/path per line, # = comment)
+breakdown batch urls.txt --llm-cmd 'claude --print --permission-mode bypassPermissions'
+
+# From stdin
+cat urls.txt | breakdown batch --skip-errors --parallel 2
+```
+
+Flags:
+- `--lens string` - Lens ID (default: "openclaw-product")
+- `--llm-cmd string` - External LLM command
+- `--format string` - Output format (default: `vault`)
+- `--parallel int` - Concurrent sources (default: 1)
+- `--skip-errors` - Continue on individual failures
+- `--artifacts-dir string` - Base artifacts directory
+- `--verbose` - Show per-source progress
+
+### `breakdown ingest <url-or-file>`
+
+Ingest a source (YouTube URL, webpage URL, or local file) and produce `source.json`.
 
 Flags:
 - `--artifacts-dir string` - Artifacts directory

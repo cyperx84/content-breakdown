@@ -14,21 +14,24 @@ import (
 	"github.com/cyperx84/content-breakdown/internal/extract"
 	"github.com/cyperx84/content-breakdown/internal/lens"
 	"github.com/cyperx84/content-breakdown/internal/schema"
-	"github.com/cyperx84/content-breakdown/internal/youtube"
+	"github.com/cyperx84/content-breakdown/internal/source"
+	_ "github.com/cyperx84/content-breakdown/internal/source" // register adapters
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run <url>",
+	Use:   "run <url-or-file>",
 	Short: "Full pipeline: ingest → analyze → emit",
-	Long: `Run the complete breakdown pipeline on a source URL.
+	Long: `Run the complete breakdown pipeline on a source.
 
-This orchestrates the full workflow:
-  1. Ingest: Fetch source (YouTube) and produce source.json
-  2. Analyze: Extract findings and apply lens
-  3. Emit: Generate vault note
+Supported sources:
+  - YouTube URLs
+  - Article / webpage URLs
+  - Local files (.md, .txt, .pdf)
 
-Use --stdout to output the final markdown note to stdout.
-Use --artifacts-dir to specify where intermediate files are stored.`,
+Orchestrates: ingest → extract → lens → emit.
+
+Use --stdout to output the final note to stdout.
+Use --format to select output format: vault|summary|prd|tasks`,
 	Args: cobra.ExactArgs(1),
 	RunE: runPipeline,
 }
@@ -39,24 +42,21 @@ var (
 	runArtifactsDir string
 	runStdout       bool
 	runVerbose      bool
+	runFormat       string
 )
 
 func init() {
 	rootCmd.AddCommand(runCmd)
 	runCmd.Flags().StringVar(&runLens, "lens", "openclaw-product", "Lens ID to apply")
-	runCmd.Flags().StringVar(&runLLMCmd, "llm-cmd", "", "External LLM command (e.g., 'claude -p')")
+	runCmd.Flags().StringVar(&runLLMCmd, "llm-cmd", "", "External LLM command (e.g., 'claude --print --permission-mode bypassPermissions')")
 	runCmd.Flags().StringVar(&runArtifactsDir, "artifacts-dir", "", "Artifacts directory (default: ./artifacts/content-breakdown/<slug>/)")
-	runCmd.Flags().BoolVar(&runStdout, "stdout", false, "Output final markdown note to stdout")
+	runCmd.Flags().BoolVar(&runStdout, "stdout", false, "Output final note to stdout")
 	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "Show progress on stderr")
+	runCmd.Flags().StringVar(&runFormat, "format", emit.FormatVault, "Output format: vault|summary|prd|tasks")
 }
 
 func runPipeline(cmd *cobra.Command, args []string) error {
-	url := args[0]
-
-	// Validate source type
-	if !isYouTubeURL(url) {
-		return fmt.Errorf("unsupported source type (only YouTube URLs supported in MVP)")
-	}
+	input := args[0]
 
 	// Find lens definition
 	lensPath := findLens(runLens)
@@ -74,9 +74,13 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "[run] Stage 1/3: Ingesting...\n")
 	}
 
-	src, err := youtube.Ingest(url)
+	src, err := source.Ingest(input)
 	if err != nil {
 		return fmt.Errorf("ingest: %w", err)
+	}
+
+	if runVerbose {
+		fmt.Fprintf(os.Stderr, "[run] Ingested: %s (%s)\n", src.Title, src.Type)
 	}
 
 	// Determine artifacts directory
@@ -85,12 +89,10 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		artifactDir = filepath.Join("artifacts", "content-breakdown", generateSlug(src))
 	}
 
-	// Ensure directory exists
 	if err := os.MkdirAll(artifactDir, 0755); err != nil {
 		return fmt.Errorf("create artifacts dir: %w", err)
 	}
 
-	// Write source.json
 	if err := writeArtifact(filepath.Join(artifactDir, "source.json"), src); err != nil {
 		return fmt.Errorf("write source.json: %w", err)
 	}
@@ -104,7 +106,6 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "[run] Stage 2/3: Analyzing...\n")
 	}
 
-	// Extraction pass
 	extractOpts := extract.Options{
 		LLMCmd:  runLLMCmd,
 		Verbose: runVerbose,
@@ -123,7 +124,6 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "[run] Wrote: %s\n", filepath.Join(artifactDir, "extraction.json"))
 	}
 
-	// Lens pass
 	lensOpts := lens.Options{
 		LLMCmd:  runLLMCmd,
 		Verbose: runVerbose,
@@ -144,10 +144,13 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 
 	// === STAGE 3: EMIT ===
 	if runVerbose {
-		fmt.Fprintf(os.Stderr, "[run] Stage 3/3: Emitting...\n")
+		fmt.Fprintf(os.Stderr, "[run] Stage 3/3: Emitting (%s)...\n", runFormat)
 	}
 
-	note := emit.VaultNote(src, extRecord, lensResult)
+	rendered, err := emit.Render(runFormat, src, extRecord, lensResult)
+	if err != nil {
+		return fmt.Errorf("render: %w", err)
+	}
 
 	manifest := &schema.ArtifactManifest{
 		SourceID:  src.ID,
@@ -156,15 +159,19 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 	}
 
 	if runStdout {
-		fmt.Print(note)
-		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "stdout", Path: "stdout"})
+		fmt.Print(rendered)
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: runFormat, Path: "stdout"})
 	} else {
-		notePath := filepath.Join(artifactDir, "note.md")
-		if err := os.WriteFile(notePath, []byte(note), 0644); err != nil {
-			return fmt.Errorf("write note.md: %w", err)
+		fname := runFormat + ".md"
+		if runFormat == emit.FormatVault {
+			fname = "note.md"
+		}
+		notePath := filepath.Join(artifactDir, fname)
+		if err := os.WriteFile(notePath, []byte(rendered), 0644); err != nil {
+			return fmt.Errorf("write %s: %w", fname, err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote: %s\n", notePath)
-		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "vault-note", Path: notePath})
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: runFormat, Path: notePath})
 	}
 
 	if err := writeManifest(artifactDir, manifest); err != nil {

@@ -28,17 +28,17 @@ Built as phased, always-working slices.
 - content-marketing lens
 - lens authoring docs
 
-## Phase 4 — More Sources
+## Phase 4 — More Sources ✅
 - article/webpage ingest
 - local markdown/text ingest
 - PDF ingest
 - normalized source adapter interface
 
-## Phase 5 — Batch + Automation
-- batch mode for URL lists
-- resumable runs
-- cron-friendly commands
-- artifact indexing/search
+## Phase 5 — Batch + Automation ✅
+- batch mode for URL lists / stdin
+- parallel processing (`--parallel N`)
+- skip-errors mode
+- per-run summary output
 
 ## Phase 6 — Quality + Packaging
 - fixture corpus

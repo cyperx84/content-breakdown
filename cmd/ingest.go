@@ -6,18 +6,26 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/cyperx84/content-breakdown/internal/schema"
+	"github.com/cyperx84/content-breakdown/internal/source"
+	_ "github.com/cyperx84/content-breakdown/internal/source" // register all adapters
 	"github.com/cyperx84/content-breakdown/internal/youtube"
 )
 
 var ingestCmd = &cobra.Command{
-	Use:   "ingest <url>",
-	Short: "Ingest a source URL and produce source.json",
-	Long: `Ingest a source URL (YouTube for MVP) and produce a normalized SourceRecord.
+	Use:   "ingest <url-or-file>",
+	Short: "Ingest a source and produce source.json",
+	Long: `Ingest a source (YouTube URL, article URL, or local file) and produce a normalized SourceRecord.
+
+Supported sources:
+  - YouTube URLs (youtube.com, youtu.be)
+  - Article / webpage URLs (http/https)
+  - Local files (.md, .txt, .pdf)
 
 The source record is written to the artifacts directory as source.json.
 Use --json to output the record to stdout instead.`,
@@ -37,32 +45,22 @@ func init() {
 }
 
 func runIngest(cmd *cobra.Command, args []string) error {
-	url := args[0]
+	input := args[0]
 
-	// Detect source type (YouTube only for MVP)
-	if !isYouTubeURL(url) {
-		return fmt.Errorf("unsupported source type (only YouTube URLs supported in MVP)")
-	}
-
-	// Ingest via YouTube adapter
-	record, err := youtube.Ingest(url)
+	record, err := source.Ingest(input)
 	if err != nil {
 		return fmt.Errorf("ingest failed: %w", err)
 	}
 
-	// Determine artifacts directory
 	artifactDir := ingestArtifactsDir
 	if artifactDir == "" {
-		slug := generateSlug(record)
-		artifactDir = filepath.Join("artifacts", "content-breakdown", slug)
+		artifactDir = filepath.Join("artifacts", "content-breakdown", generateSlug(record))
 	}
 
-	// Ensure directory exists
 	if err := os.MkdirAll(artifactDir, 0755); err != nil {
 		return fmt.Errorf("create artifacts dir: %w", err)
 	}
 
-	// Write source.json
 	sourcePath := filepath.Join(artifactDir, "source.json")
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
@@ -73,46 +71,38 @@ func runIngest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("write source.json: %w", err)
 	}
 
-	// Output
 	if ingestJSONOutput {
 		fmt.Println(string(data))
 	} else {
 		fmt.Fprintf(os.Stderr, "Ingested: %s\n", record.Title)
+		fmt.Fprintf(os.Stderr, "Type: %s\n", record.Type)
 		fmt.Fprintf(os.Stderr, "Artifacts: %s\n", artifactDir)
-		fmt.Fprintf(os.Stderr, "Source: %s\n", sourcePath)
 	}
 
 	return nil
 }
 
-func isYouTubeURL(url string) bool {
-	return containsAny(url, "youtube.com/watch", "youtu.be/", "youtube.com/shorts")
+func generateSlug(record *schema.SourceRecord) string {
+	date := time.Now().Format("2006-01-02")
+	titleSlug := titleToSlug(record.Title)
+	return fmt.Sprintf("%s_%s", date, titleSlug)
+}
+
+func titleToSlug(title string) string {
+	// Reuse youtube.Slug logic for any title
+	return youtube.Slug(title)
+}
+
+// isYouTubeURL is kept for use in cmd/run.go compatibility
+func isYouTubeURL(u string) bool {
+	return containsAny(u, "youtube.com/watch", "youtu.be/", "youtube.com/shorts")
 }
 
 func containsAny(s string, substrs ...string) bool {
 	for _, substr := range substrs {
-		if contains(s, substr) {
+		if strings.Contains(s, substr) {
 			return true
 		}
 	}
 	return false
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func generateSlug(record *schema.SourceRecord) string {
-	date := time.Now().Format("2006-01-02")
-	titleSlug := youtube.Slug(record.Title)
-	return fmt.Sprintf("%s_%s", date, titleSlug)
 }
