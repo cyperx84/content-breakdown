@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -40,38 +41,45 @@ func init() {
 func runEmit(cmd *cobra.Command, args []string) error {
 	artifactDir := args[0]
 
-	// Load all artifacts
 	src, ext, lensResult, err := loadArtifacts(artifactDir)
 	if err != nil {
 		return err
 	}
 
-	// Generate vault note
 	note := emit.VaultNote(src, ext, lensResult)
+	manifest := &schema.ArtifactManifest{
+		SourceID:  src.ID,
+		LensID:    lensResult.LensID,
+		CreatedAt: time.Now(),
+	}
 
-	// Output
 	switch {
 	case emitStdout:
 		fmt.Print(note)
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "stdout", Path: "stdout"})
 	case emitOutput != "":
 		if err := os.WriteFile(emitOutput, []byte(note), 0644); err != nil {
 			return fmt.Errorf("write output file: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote: %s\n", emitOutput)
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "vault-note", Path: emitOutput})
 	default:
-		// Default: write to artifact dir
 		notePath := filepath.Join(artifactDir, "note.md")
 		if err := os.WriteFile(notePath, []byte(note), 0644); err != nil {
 			return fmt.Errorf("write note.md: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote: %s\n", notePath)
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "vault-note", Path: notePath})
+	}
+
+	if err := writeManifest(artifactDir, manifest); err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func loadArtifacts(artifactDir string) (*schema.SourceRecord, *schema.ExtractionRecord, *schema.LensResult, error) {
-	// Load source.json
 	sourcePath := filepath.Join(artifactDir, "source.json")
 	sourceData, err := os.ReadFile(sourcePath)
 	if err != nil {
@@ -83,7 +91,6 @@ func loadArtifacts(artifactDir string) (*schema.SourceRecord, *schema.Extraction
 		return nil, nil, nil, fmt.Errorf("parse source.json: %w", err)
 	}
 
-	// Load extraction.json
 	extPath := filepath.Join(artifactDir, "extraction.json")
 	extData, err := os.ReadFile(extPath)
 	if err != nil {
@@ -95,7 +102,6 @@ func loadArtifacts(artifactDir string) (*schema.SourceRecord, *schema.Extraction
 		return nil, nil, nil, fmt.Errorf("parse extraction.json: %w", err)
 	}
 
-	// Load lens.json
 	lensPath := filepath.Join(artifactDir, "lens.json")
 	lensData, err := os.ReadFile(lensPath)
 	if err != nil {
@@ -108,4 +114,17 @@ func loadArtifacts(artifactDir string) (*schema.SourceRecord, *schema.Extraction
 	}
 
 	return &src, &ext, &lensResult, nil
+}
+
+func writeManifest(artifactDir string, manifest *schema.ArtifactManifest) error {
+	manifestPath := filepath.Join(artifactDir, "manifest.json")
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal manifest: %w", err)
+	}
+	if err := os.WriteFile(manifestPath, data, 0644); err != nil {
+		return fmt.Errorf("write manifest.json: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Wrote: %s\n", manifestPath)
+	return nil
 }

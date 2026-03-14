@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/cyperx84/content-breakdown/internal/emit"
 	"github.com/cyperx84/content-breakdown/internal/extract"
 	"github.com/cyperx84/content-breakdown/internal/lens"
+	"github.com/cyperx84/content-breakdown/internal/schema"
 	"github.com/cyperx84/content-breakdown/internal/youtube"
 )
 
@@ -147,14 +149,26 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 
 	note := emit.VaultNote(src, extRecord, lensResult)
 
+	manifest := &schema.ArtifactManifest{
+		SourceID:  src.ID,
+		LensID:    lensResult.LensID,
+		CreatedAt: time.Now(),
+	}
+
 	if runStdout {
 		fmt.Print(note)
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "stdout", Path: "stdout"})
 	} else {
 		notePath := filepath.Join(artifactDir, "note.md")
 		if err := os.WriteFile(notePath, []byte(note), 0644); err != nil {
 			return fmt.Errorf("write note.md: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote: %s\n", notePath)
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "vault-note", Path: notePath})
+	}
+
+	if err := writeManifest(artifactDir, manifest); err != nil {
+		return err
 	}
 
 	if runVerbose || !runStdout {

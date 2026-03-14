@@ -8,15 +8,15 @@ import "time"
 
 // SourceRecord represents a normalized ingested source.
 type SourceRecord struct {
-	ID           string            `json:"id"`
-	Type         string            `json:"type"`
-	CanonicalURL string            `json:"canonicalUrl"`
-	Title        string            `json:"title"`
-	Author       string            `json:"author"`
-	PublishedAt  *string           `json:"publishedAt,omitempty"`
-	Duration     *string           `json:"duration,omitempty"`
-	Transcript   string            `json:"transcript"`
-	Metadata     SourceMetadata    `json:"metadata"`
+	ID           string         `json:"id"`
+	Type         string         `json:"type"`
+	CanonicalURL string         `json:"canonicalUrl"`
+	Title        string         `json:"title"`
+	Author       string         `json:"author"`
+	PublishedAt  *string        `json:"publishedAt,omitempty"`
+	Duration     *string        `json:"duration,omitempty"`
+	Transcript   string         `json:"transcript"`
+	Metadata     SourceMetadata `json:"metadata"`
 }
 
 // SourceMetadata holds extraction-time metadata.
@@ -28,14 +28,14 @@ type SourceMetadata struct {
 
 // ExtractionRecord represents structured findings from a source.
 type ExtractionRecord struct {
-	SourceID    string    `json:"sourceId"`
-	Summary     string    `json:"summary"`
-	Tools       []string  `json:"tools"`
-	Workflows   []string  `json:"workflows"`
-	Opportunities []string `json:"opportunities"`
-	Claims      []string  `json:"claims,omitempty"`
-	Quotes      []string  `json:"quotes,omitempty"`
-	Metadata    ExtractionMetadata `json:"metadata"`
+	SourceID      string             `json:"sourceId"`
+	Summary       string             `json:"summary"`
+	Tools         []string           `json:"tools"`
+	Workflows     []string           `json:"workflows"`
+	Opportunities []string           `json:"opportunities"`
+	Claims        []string           `json:"claims,omitempty"`
+	Quotes        []string           `json:"quotes,omitempty"`
+	Metadata      ExtractionMetadata `json:"metadata"`
 }
 
 // ExtractionMetadata holds generation-time metadata.
@@ -73,10 +73,10 @@ type LensMetadata struct {
 
 // ArtifactManifest records what was emitted.
 type ArtifactManifest struct {
-	SourceID    string           `json:"sourceId"`
-	LensID      string           `json:"lensId"`
-	Emitted     []EmittedArtifact `json:"emitted"`
-	CreatedAt   time.Time        `json:"createdAt"`
+	SourceID  string            `json:"sourceId"`
+	LensID    string            `json:"lensId"`
+	Emitted   []EmittedArtifact `json:"emitted"`
+	CreatedAt time.Time         `json:"createdAt"`
 }
 
 // EmittedArtifact records a single output artifact.

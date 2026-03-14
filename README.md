@@ -131,6 +131,7 @@ artifacts/content-breakdown/2026-03-14_video-title/
 ├── source.json       # SourceRecord (transcript + metadata)
 ├── extraction.json   # ExtractionRecord (structured findings)
 ├── lens.json         # LensResult (ranked insights)
+├── manifest.json     # ArtifactManifest (what was emitted + when)
 └── note.md           # Emitted vault note
 ```
 
@@ -183,6 +184,14 @@ go build -o breakdown .
 # Run tests
 go test ./...
 ```
+
+## Skill Wrapper
+
+A thin OpenClaw skill wrapper is included at:
+
+- `skills/content-breakdown/SKILL.md`
+
+It runs the CLI end-to-end and can optionally save the generated note into Obsidian when explicitly requested.
 
 ## See Also
 

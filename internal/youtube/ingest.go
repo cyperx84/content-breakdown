@@ -47,12 +47,12 @@ func checkYTDLP() error {
 
 // ytDlpMeta is the subset of yt-dlp --dump-json we care about.
 type ytDlpMeta struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Channel      string `json:"channel"`
-	UploadDate   string `json:"upload_date"`
-	Duration     int    `json:"duration"`
-	URL          string `json:"webpage_url"`
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Channel    string `json:"channel"`
+	UploadDate string `json:"upload_date"`
+	Duration   int    `json:"duration"`
+	URL        string `json:"webpage_url"`
 }
 
 func fetchMetadata(videoURL string) (*ytDlpMeta, error) {
