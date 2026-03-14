@@ -4,12 +4,135 @@ Content Breakdown Workflow — transforms source material into structured findin
 
 ## Status
 
-MVP scaffold. Core types and package layout are in place. Extraction and lens pipeline implementation pending.
+**MVP Complete.** Full pipeline working: ingest → extract → lens → emit.
 
 ## Prerequisites
 
 - Go 1.26+
 - `yt-dlp` on PATH (`brew install yt-dlp`)
+
+## Installation
+
+```bash
+go build -o breakdown .
+```
+
+Or install to $GOPATH/bin:
+```bash
+go install .
+```
+
+## Usage
+
+### Full Pipeline (Recommended)
+
+```bash
+# Run the complete workflow with stdout output
+breakdown run "https://youtube.com/watch?v=..." --stdout
+
+# With verbose logging
+breakdown run "https://youtube.com/watch?v=..." --stdout --verbose
+
+# With custom LLM command
+breakdown run "https://youtube.com/watch?v=..." --llm-cmd "claude -p" --stdout
+
+# Specify custom artifacts directory
+breakdown run "https://youtube.com/watch?v=..." --artifacts-dir ./my-artifacts
+```
+
+### Step-by-Step
+
+```bash
+# 1. Ingest source (YouTube)
+breakdown ingest "https://youtube.com/watch?v=..." --json
+
+# 2. Analyze (extract + lens)
+breakdown analyze ./artifacts/content-breakdown/2026-03-14_video-title \
+  --lens openclaw-product \
+  --llm-cmd "claude -p"
+
+# 3. Emit vault note
+breakdown emit ./artifacts/content-breakdown/2026-03-14_video-title --stdout
+```
+
+## Commands
+
+### `breakdown run <url>`
+
+Full pipeline: ingest → analyze → emit.
+
+Flags:
+- `--lens string` - Lens ID to apply (default: "openclaw-product")
+- `--llm-cmd string` - External LLM command (e.g., 'claude -p')
+- `--artifacts-dir string` - Artifacts directory (default: ./artifacts/content-breakdown/<slug>/)
+- `--stdout` - Output final markdown note to stdout
+- `--verbose` - Show progress on stderr
+
+### `breakdown ingest <url>`
+
+Ingest a source URL and produce `source.json`.
+
+Flags:
+- `--artifacts-dir string` - Artifacts directory
+- `--json` - Output SourceRecord as JSON to stdout
+
+### `breakdown analyze <artifacts-dir>`
+
+Run extraction and lens passes on ingested source.
+
+Flags:
+- `--lens string` - Lens ID to apply (default: "openclaw-product")
+- `--llm-cmd string` - External LLM command
+- `--json` - Output LensResult as JSON to stdout
+- `--verbose` - Show progress on stderr
+
+### `breakdown emit <artifacts-dir>`
+
+Generate vault note from analysis artifacts.
+
+Flags:
+- `--stdout` - Output markdown to stdout
+- `--output string` - Output file path
+
+## Architecture
+
+### Pipeline Stages
+
+1. **Ingest** - Fetch source material (YouTube via yt-dlp)
+   - Input: URL
+   - Output: `source.json` (SourceRecord)
+
+2. **Extract** - LLM extracts structured findings
+   - Input: SourceRecord
+   - Output: `extraction.json` (ExtractionRecord)
+   - Finds: summary, tools, workflows, opportunities, claims, quotes
+
+3. **Lens** - LLM applies lens perspective
+   - Input: ExtractionRecord + Lens definition
+   - Output: `lens.json` (LensResult)
+   - Produces: relevance score, ranked ideas, recommended artifacts
+
+4. **Emit** - Generate vault note (pure template)
+   - Input: SourceRecord + ExtractionRecord + LensResult
+   - Output: Markdown vault note
+   - No LLM call - deterministic rendering
+
+### Design Principles
+
+- **2 LLM calls per run:** extract → lens (emitter is pure Go template)
+- **Keyless CLI:** No API keys in binary, uses stdin-mode or external LLM command
+- **Model-agnostic:** Works with any LLM via `--llm-cmd`
+- **Composable:** Each stage works independently
+
+### Artifact Layout
+
+```
+artifacts/content-breakdown/2026-03-14_video-title/
+├── source.json       # SourceRecord (transcript + metadata)
+├── extraction.json   # ExtractionRecord (structured findings)
+├── lens.json         # LensResult (ranked insights)
+└── note.md           # Emitted vault note
+```
 
 ## Package Layout
 
@@ -19,38 +142,49 @@ breakdown/
 ├── cmd/                         # Cobra CLI commands
 │   ├── root.go
 │   ├── version.go
-│   ├── run.go                   # (todo) Happy-path orchestration
-│   ├── ingest.go                # (todo) Source ingestion
-│   ├── analyze.go               # (todo) Extraction + lens
-│   └── emit.go                  # (todo) Artifact emission
+│   ├── run.go                   # Happy-path orchestration
+│   ├── ingest.go                # Source ingestion
+│   ├── analyze.go               # Extraction + lens
+│   └── emit.go                  # Artifact emission
 ├── internal/
 │   ├── schema/record.go         # SourceRecord, ExtractionRecord, LensResult
-│   ├── youtube/ingest.go        # yt-dlp wrapper + VTT parser
-│   ├── extract/                 # (todo) LLM extraction pass
-│   ├── lens/                    # (todo) Lens execution
+│   ├── youtube/ingest.go        # yt-dlp wrapper + VTT/JSON3 parser
+│   ├── extract/
+│   │   ├── extract.go           # Extraction pass
+│   │   └── prompts.go           # Extraction prompt template
+│   ├── lens/
+│   │   ├── lens.go              # Lens execution
+│   │   └── prompts.go           # Lens prompt template
 │   └── emit/vault.go            # Vault note markdown generation
 ├── lenses/
 │   └── openclaw-product.json    # Lens definition
 └── go.mod
 ```
 
-## Usage (planned)
+## Lenses
+
+Lenses are JSON files that define a perspective for analyzing content.
+
+Default lens: `openclaw-product` - Identifies material relevant to OpenClaw product development.
+
+Custom lenses can be placed in:
+- `./lenses/<id>.json`
+- `~/.openclaw/lenses/<id>.json`
+
+## Development
 
 ```bash
-# Full pipeline
-breakdown run "https://youtube.com/watch?v=..." --stdout
+# Build
+go build -o breakdown .
 
-# Step-by-step
-breakdown ingest "https://youtube.com/watch?v=..." --json
-breakdown analyze ./artifacts/content-breakdown/slug --lens openclaw-product
-breakdown emit ./artifacts/content-breakdown/slug --stdout
+# Test with a real video
+./breakdown run "https://youtube.com/watch?v=..." --llm-cmd "claude -p" --stdout
+
+# Run tests
+go test ./...
 ```
 
-## Architecture Notes
+## See Also
 
-- **2 LLM calls per run:** extract → lens (emitter is pure template)
-- **Stdin-mode LLM:** CLI emits prompts, harness pipes model responses
-- **No API keys in CLI:** keyless design, harness provides model access
-- **Artifacts on disk:** `artifacts/content-breakdown/<slug>/`
-
-See `content-breakdown-mvp-review.md` in the workspace root for the full architecture review.
+- Architecture review: `~/.openclaw/workspace/content-breakdown-mvp-review.md`
+- Build brief: `~/.openclaw/workspace/builder-briefs/content-breakdown-phase1.md`
