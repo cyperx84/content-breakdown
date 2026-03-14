@@ -1,0 +1,36 @@
+{
+  "id": "founder-research",
+  "name": "Founder Research Lens",
+  "purpose": "Extract strategic market, product, and execution signals useful for a founder deciding what to build, test, or prioritize.",
+  "questions": [
+    "What demand or pain signal is visible here?",
+    "What wedge, insight, or timing advantage exists?",
+    "What should be tested quickly versus ignored?",
+    "What implementation path could validate this cheaply?",
+    "Does this suggest positioning, market selection, or product focus?"
+  ],
+  "rankingDimensions": [
+    "marketSignal",
+    "speedToValidation",
+    "strategicDifferentiation",
+    "implementationRisk",
+    "founderFit"
+  ],
+  "ignoreRules": [
+    "Technical novelty with no market implication",
+    "Big-company strategy that does not transfer to startups",
+    "Interesting detail with no wedge or validation path",
+    "Signals too weak to act on"
+  ],
+  "artifactRules": {
+    "low": ["summary note only"],
+    "medium": ["summary note", "decision memo"],
+    "high": ["summary note", "decision memo", "validation plan"]
+  },
+  "projectContextHints": [
+    "founder",
+    "product-strategy",
+    "validation",
+    "market-research"
+  ]
+}

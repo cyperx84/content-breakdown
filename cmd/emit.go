@@ -30,12 +30,14 @@ Use --stdout to output to stdout, or --output to write to a file.`,
 var (
 	emitStdout bool
 	emitOutput string
+	emitFormat string
 )
 
 func init() {
 	rootCmd.AddCommand(emitCmd)
 	emitCmd.Flags().BoolVar(&emitStdout, "stdout", false, "Output markdown to stdout")
-	emitCmd.Flags().StringVar(&emitOutput, "output", "", "Output file path (default: <artifacts-dir>/note.md)")
+	emitCmd.Flags().StringVar(&emitOutput, "output", "", "Output file path (default: <artifacts-dir>/<format>.md)")
+	emitCmd.Flags().StringVar(&emitFormat, "format", emit.FormatVault, "Output format: vault|summary|prd|tasks")
 }
 
 func runEmit(cmd *cobra.Command, args []string) error {
@@ -46,30 +48,38 @@ func runEmit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	note := emit.VaultNote(src, ext, lensResult)
+	rendered, err := emit.Render(emitFormat, src, ext, lensResult)
+	if err != nil {
+		return err
+	}
 	manifest := &schema.ArtifactManifest{
 		SourceID:  src.ID,
 		LensID:    lensResult.LensID,
 		CreatedAt: time.Now(),
 	}
 
+	artifactType := fmt.Sprintf("%s-note", emitFormat)
 	switch {
 	case emitStdout:
-		fmt.Print(note)
-		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "stdout", Path: "stdout"})
+		fmt.Print(rendered)
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: artifactType, Path: "stdout"})
 	case emitOutput != "":
-		if err := os.WriteFile(emitOutput, []byte(note), 0644); err != nil {
+		if err := os.WriteFile(emitOutput, []byte(rendered), 0644); err != nil {
 			return fmt.Errorf("write output file: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote: %s\n", emitOutput)
-		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "vault-note", Path: emitOutput})
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: artifactType, Path: emitOutput})
 	default:
-		notePath := filepath.Join(artifactDir, "note.md")
-		if err := os.WriteFile(notePath, []byte(note), 0644); err != nil {
-			return fmt.Errorf("write note.md: %w", err)
+		defaultName := fmt.Sprintf("%s.md", emitFormat)
+		if emitFormat == emit.FormatVault {
+			defaultName = "note.md"
 		}
-		fmt.Fprintf(os.Stderr, "Wrote: %s\n", notePath)
-		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: "vault-note", Path: notePath})
+		outPath := filepath.Join(artifactDir, defaultName)
+		if err := os.WriteFile(outPath, []byte(rendered), 0644); err != nil {
+			return fmt.Errorf("write output file: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Wrote: %s\n", outPath)
+		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: artifactType, Path: outPath})
 	}
 
 	if err := writeManifest(artifactDir, manifest); err != nil {

@@ -1,0 +1,36 @@
+{
+  "id": "personal-os",
+  "name": "Personal OS Lens",
+  "purpose": "Identify patterns, workflows, and systems that improve a personal operating system for knowledge, execution, and agent collaboration.",
+  "questions": [
+    "Does this improve capture, organization, or retrieval?",
+    "Does this improve execution workflows between human and agents?",
+    "Does this improve knowledge compounding over time?",
+    "Is this realistic for a solo builder or small team?",
+    "Would this reduce friction or cognitive load materially?"
+  ],
+  "rankingDimensions": [
+    "dailyLeverage",
+    "compoundingValue",
+    "implementationSimplicity",
+    "workflowFit",
+    "signalToNoise"
+  ],
+  "ignoreRules": [
+    "Generic productivity advice with no concrete system design",
+    "Ideas requiring enterprise scale to be useful",
+    "Novelty with no repeatable workflow value",
+    "Pure inspiration with no operational pattern"
+  ],
+  "artifactRules": {
+    "low": ["summary note only"],
+    "medium": ["summary note", "task list"],
+    "high": ["summary note", "task list", "system design note"]
+  },
+  "projectContextHints": [
+    "personal-os",
+    "obsidian",
+    "openclaw",
+    "agent-workflows"
+  ]
+}

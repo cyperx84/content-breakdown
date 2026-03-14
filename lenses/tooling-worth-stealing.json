@@ -1,0 +1,36 @@
+{
+  "id": "tooling-worth-stealing",
+  "name": "Tooling Worth Stealing Lens",
+  "purpose": "Find concrete product, UX, CLI, or systems ideas that are worth borrowing, adapting, or reinterpreting in your own tools.",
+  "questions": [
+    "What implementation pattern is actually worth stealing?",
+    "Is the idea specific enough to reproduce?",
+    "Would it create leverage in current tools or workflows?",
+    "Can it be adapted rather than copied literally?",
+    "Does it improve UX, developer experience, or system capability?"
+  ],
+  "rankingDimensions": [
+    "specificity",
+    "adaptability",
+    "userImpact",
+    "implementationCost",
+    "novelty"
+  ],
+  "ignoreRules": [
+    "Brand positioning with no concrete mechanism",
+    "Ideas that depend entirely on inaccessible proprietary infrastructure",
+    "Features that are obvious but not differentiated",
+    "High-level claims with no visible implementation pattern"
+  ],
+  "artifactRules": {
+    "low": ["summary note only"],
+    "medium": ["summary note", "ranked ideas"],
+    "high": ["summary note", "ranked ideas", "prototype brief"]
+  },
+  "projectContextHints": [
+    "cli-ux",
+    "agent-tools",
+    "tooling",
+    "product-patterns"
+  ]
+}

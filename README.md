@@ -4,7 +4,13 @@ Content Breakdown Workflow — transforms source material into structured findin
 
 ## Status
 
-**MVP Complete.** Full pipeline working: ingest → extract → lens → emit.
+**Phase 1 complete. Phase 2 in progress.** Full pipeline working: ingest → extract → lens → emit.
+
+Current output formats:
+- `vault`
+- `summary`
+- `prd`
+- `tasks`
 
 ## Prerequisites
 
@@ -53,6 +59,12 @@ breakdown analyze ./artifacts/content-breakdown/2026-03-14_video-title \
 
 # 3. Emit vault note
 breakdown emit ./artifacts/content-breakdown/2026-03-14_video-title --stdout
+
+# 4. Emit a PRD seed from the same artifacts
+breakdown emit ./artifacts/content-breakdown/2026-03-14_video-title --format prd --stdout
+
+# 5. Emit a task list from the same artifacts
+breakdown emit ./artifacts/content-breakdown/2026-03-14_video-title --format tasks --stdout
 ```
 
 ## Commands
@@ -88,9 +100,10 @@ Flags:
 
 ### `breakdown emit <artifacts-dir>`
 
-Generate vault note from analysis artifacts.
+Generate output artifacts from analysis artifacts.
 
 Flags:
+- `--format string` - Output format: `vault|summary|prd|tasks` (default: `vault`)
 - `--stdout` - Output markdown to stdout
 - `--output string` - Output file path
 
@@ -166,7 +179,11 @@ breakdown/
 
 Lenses are JSON files that define a perspective for analyzing content.
 
-Default lens: `openclaw-product` - Identifies material relevant to OpenClaw product development.
+Built-in lenses:
+- `openclaw-product` - material relevant to OpenClaw product development
+- `personal-os` - systems and workflows for a personal operating system
+- `tooling-worth-stealing` - concrete product/UX/tooling ideas worth adapting
+- `founder-research` - market/product signals useful for founder decisions
 
 Custom lenses can be placed in:
 - `./lenses/<id>.json`
@@ -192,6 +209,10 @@ A thin OpenClaw skill wrapper is included at:
 - `skills/content-breakdown/SKILL.md`
 
 It runs the CLI end-to-end and can optionally save the generated note into Obsidian when explicitly requested.
+
+## Roadmap
+
+See `ROADMAP.md` for the phased build plan.
 
 ## See Also
 

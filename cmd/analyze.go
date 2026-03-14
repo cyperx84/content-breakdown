@@ -30,9 +30,9 @@ Outputs:
 }
 
 var (
-	analyzeLens     string
-	analyzeLLMCmd   string
-	analyzeVerbose  bool
+	analyzeLens       string
+	analyzeLLMCmd     string
+	analyzeVerbose    bool
 	analyzeJSONOutput bool
 )
 
