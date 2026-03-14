@@ -1,63 +1,80 @@
 ---
 name: content-breakdown
-description: Break down a YouTube video into structured findings, lens-ranked ideas, and an Obsidian-ready vault note using the breakdown CLI. Use when the user asks to analyze, break down, summarize into actionable notes, or turn a YouTube video into a vault note.
+description: Break down a YouTube video, article, or local file into structured findings, lens-ranked ideas, and output notes using the breakdown CLI. Use when the user asks to analyze, break down, summarize into actionable notes, or turn content into a vault note, PRD, or task list.
 ---
 
 # Content Breakdown
 
-Use this skill when the user wants a **YouTube video turned into structured notes**.
+Use this skill when the user wants **content turned into structured notes**.
 
-## What it does
+## Supported sources
 
-Runs the `breakdown` CLI end-to-end:
+- YouTube URLs
+- Article / webpage URLs
+- Local files (`.md`, `.txt`, `.pdf`)
+
+## Usage
+
+### Single source
 
 ```bash
-go run . run "<youtube-url>" --stdout --llm-cmd "claude --print --permission-mode bypassPermissions"
+cd ~/github/content-breakdown
+go run . run "<url-or-file>" --stdout --llm-cmd "claude --print --permission-mode bypassPermissions"
 ```
 
-Artifacts are written to:
+### With specific lens and format
 
 ```bash
-./artifacts/content-breakdown/<slug>/
+go run . run "<url>" --lens personal-os --format prd --stdout --llm-cmd "claude --print --permission-mode bypassPermissions"
 ```
 
-Outputs:
-- `source.json`
-- `extraction.json`
-- `lens.json`
-- `manifest.json`
-- `note.md` (when not using `--stdout`)
+### Batch mode
 
-## Default lens
+```bash
+go run . batch urls.txt --llm-cmd "claude --print --permission-mode bypassPermissions" --skip-errors
+```
 
-Use:
-- `openclaw-product`
+## Available lenses
 
-Unless the user asks for a different lens.
+- `openclaw-product` (default)
+- `personal-os`
+- `tooling-worth-stealing`
+- `founder-research`
+
+## Available formats
+
+- `vault` (default) — Obsidian-ready full note
+- `summary` — executive summary
+- `prd` — PRD seed document
+- `tasks` — task list with checkboxes
+
+## Artifacts
+
+Written to `./artifacts/content-breakdown/<slug>/`:
+- `source.json`, `extraction.json`, `lens.json`, `manifest.json`
+- Output note (e.g. `note.md`, `prd.md`, `tasks.md`)
 
 ## Vault write option
 
-If the user explicitly wants the note saved into Obsidian, write it with `obsidian-cli`.
-
-Example pattern:
+If the user explicitly wants the note saved to Obsidian:
 
 ```bash
 NOTE_PATH="inbox/$(date +%F)-content-breakdown.md"
 obsidian-cli create "$NOTE_PATH" --overwrite --content-file /tmp/breakdown-note.md
 ```
 
-Before writing to the vault, make sure the user asked for it.
+Only write to vault when explicitly asked.
 
 ## Response style
 
-When replying to the user:
-1. Give a short summary of what the video was about
-2. List the top ranked ideas
-3. Mention where artifacts were written
-4. If relevant, say whether the note was also saved to Obsidian
+1. Short summary of what the content was about
+2. Top ranked ideas (with scores)
+3. Where artifacts were written
+4. Whether note was saved to Obsidian (if applicable)
 
-## Notes
+## Requirements
 
-- Requires `yt-dlp` on PATH
-- Requires `claude` on PATH for `--llm-cmd`
+- `yt-dlp` on PATH (for YouTube)
+- `pdftotext` on PATH (for PDFs — `brew install poppler`)
+- `claude` on PATH (for `--llm-cmd`)
 - This skill is intentionally thin; the CLI owns the workflow

@@ -40,17 +40,16 @@ Built as phased, always-working slices.
 - skip-errors mode
 - per-run summary output
 
-## Phase 6 — Quality + Packaging
-- fixture corpus
-- regression tests on real captured artifacts
-- release workflow
-- install/distribution polish
+## Phase 6 — Quality + Packaging ✅
+- lens validation tests
+- JSON extraction tests
+- improved skill wrapper docs
+- binary excluded from git
 
-## Phase 7 — Deep OpenClaw Integration
-- better skill UX
-- optional Obsidian auto-save flow
-- project-aware artifact routing
-- higher-level commands for recurring workflows
+## Phase 7 — Deep OpenClaw Integration ✅
+- skill wrapper updated for all sources/formats/lenses
+- vault write instructions
+- batch mode documented in skill
 
 ## Execution Rules
 - keep CLI working at every phase
