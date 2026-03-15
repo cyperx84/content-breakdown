@@ -1,0 +1,41 @@
+{
+  "id": "coding-agents",
+  "name": "Coding Agents Lens",
+  "purpose": "Extract workflows, patterns, and techniques for using AI coding agents effectively — what to steal, adopt, and adapt for your own coding agent setup.",
+  "questions": [
+    "What specific coding agent workflow is demonstrated?",
+    "What prompt patterns or interaction styles make the agent more effective?",
+    "What tools, flags, or modes are used and why?",
+    "How does the human steer or supervise the agent?",
+    "What failure modes are shown and how are they handled?",
+    "What parallelism or multi-agent patterns are used?",
+    "What context management techniques are demonstrated?",
+    "Is this pattern directly adoptable in our setup (Claude Code, Codex, Gemini CLI)?"
+  ],
+  "rankingDimensions": [
+    "directAdoptability",
+    "workflowLeverage",
+    "novelty",
+    "implementationSimplicity",
+    "applicabilityToOurStack"
+  ],
+  "ignoreRules": [
+    "Generic AI hype with no concrete agent workflow",
+    "Enterprise-only patterns requiring infrastructure we don't have",
+    "Demo tricks that don't generalise to real work",
+    "Obvious patterns already in use"
+  ],
+  "artifactRules": {
+    "low": ["summary note only"],
+    "medium": ["summary note", "workflow breakdown"],
+    "high": ["summary note", "workflow breakdown", "adoption checklist"]
+  },
+  "projectContextHints": [
+    "claude-code",
+    "codex-cli",
+    "gemini-cli",
+    "opencode",
+    "agent-army",
+    "builder"
+  ]
+}
