@@ -2,9 +2,11 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -43,6 +45,7 @@ var (
 	runStdout       bool
 	runVerbose      bool
 	runFormat       string
+	runThink        bool
 )
 
 func init() {
@@ -53,6 +56,7 @@ func init() {
 	runCmd.Flags().BoolVar(&runStdout, "stdout", false, "Output final note to stdout")
 	runCmd.Flags().BoolVar(&runVerbose, "verbose", false, "Show progress on stderr")
 	runCmd.Flags().StringVar(&runFormat, "format", emit.FormatVault, "Output format: vault|summary|prd|tasks")
+	runCmd.Flags().BoolVar(&runThink, "think", false, "Append mental models analysis via lattice")
 }
 
 func runPipeline(cmd *cobra.Command, args []string) error {
@@ -158,6 +162,14 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		CreatedAt: time.Now(),
 	}
 
+	// Lattice mental models integration
+	if runThink {
+		thinkSection := runLatticeThink(src.Title, runVerbose)
+		if thinkSection != "" {
+			rendered += "\n" + thinkSection
+		}
+	}
+
 	if runStdout {
 		fmt.Print(rendered)
 		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: runFormat, Path: "stdout"})
@@ -192,4 +204,56 @@ func writeArtifact(path string, data interface{}) error {
 		return err
 	}
 	return os.WriteFile(path, jsonData, 0644)
+}
+
+type latticeThinkModel struct {
+	ModelName string `json:"model_name"`
+	Category  string `json:"category"`
+}
+
+type latticeThinkResult struct {
+	Models  []latticeThinkModel `json:"models"`
+	Summary string              `json:"summary"`
+}
+
+func runLatticeThink(contentTitle string, verbose bool) string {
+	if _, err := exec.LookPath("lattice"); err != nil {
+		fmt.Fprintf(os.Stderr, "[run] Warning: lattice not on PATH, skipping --think\n")
+		return ""
+	}
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "[run] Running lattice think...\n")
+	}
+
+	cmd := exec.Command("lattice", "think", contentTitle, "--json")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "[run] Lattice failed: %s\n", err)
+		}
+		return ""
+	}
+
+	var result latticeThinkResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "[run] Lattice JSON parse failed: %s\n", err)
+		}
+		return ""
+	}
+
+	var section string
+	section = "## Mental Models\n\n"
+	for _, m := range result.Models {
+		section += fmt.Sprintf("- **%s** (%s)\n", m.ModelName, m.Category)
+	}
+	if result.Summary != "" {
+		section += "\n### Synthesis\n\n" + result.Summary + "\n"
+	}
+
+	return section
 }

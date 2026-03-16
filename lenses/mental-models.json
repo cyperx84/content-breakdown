@@ -1,0 +1,18 @@
+{
+  "id": "mental-models",
+  "name": "Mental Models",
+  "purpose": "Surface the cognitive frameworks and mental models present in or applicable to this content",
+  "questions": [
+    "What mental models does the author use explicitly or implicitly?",
+    "Which of Munger's 98 models best explain the core ideas here?",
+    "What thinking traps or biases are present?",
+    "How do these models connect into a latticework?"
+  ],
+  "rankingDimensions": ["applicability", "insight_depth", "actionability"],
+  "ignoreRules": ["surface-level summaries without framework analysis", "pure recaps"],
+  "artifactRules": {
+    "vault": ["model-connections", "key-insights", "thinking-traps"],
+    "summary": ["top-models", "latticework-connections"]
+  },
+  "projectContextHints": ["Look for both explicit and implicit use of mental models", "Note where the author avoids useful models they could have used"]
+}
