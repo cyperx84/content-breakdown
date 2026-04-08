@@ -23,6 +23,15 @@ func VaultNote(src *schema.SourceRecord, ext *schema.ExtractionRecord, lens *sch
 	fmt.Fprintf(&b, "created: %s\n", time.Now().Format("2006-01-02"))
 	fmt.Fprintf(&b, "tags: [breakdown, %s]\n", yamlTag(lens.LensID))
 	fmt.Fprintf(&b, "source: %s\n", yamlString(src.CanonicalURL))
+	if src.Author != "" {
+		fmt.Fprintf(&b, "author: %s\n", yamlString(src.Author))
+	}
+	if src.PublishedAt != "" {
+		fmt.Fprintf(&b, "published: %s\n", src.PublishedAt)
+	}
+	if src.Duration != "" {
+		fmt.Fprintf(&b, "duration: %s\n", yamlString(src.Duration))
+	}
 	fmt.Fprintf(&b, "lens: %s\n", yamlString(lens.LensID))
 	fmt.Fprintf(&b, "relevance: %.2f\n", lens.RelevanceScore)
 	b.WriteString("---\n\n")
@@ -33,14 +42,14 @@ func VaultNote(src *schema.SourceRecord, ext *schema.ExtractionRecord, lens *sch
 	fmt.Fprintf(&b, "- **Title:** %s\n", src.Title)
 	fmt.Fprintf(&b, "- **URL:** %s\n", src.CanonicalURL)
 	fmt.Fprintf(&b, "- **Author:** %s\n", src.Author)
-	if src.PublishedAt != nil && *src.PublishedAt != "" {
-		fmt.Fprintf(&b, "- **Published:** %s\n", *src.PublishedAt)
+	if src.PublishedAt != "" {
+		fmt.Fprintf(&b, "- **Published:** %s\n", src.PublishedAt)
 	}
-	if src.Duration != nil && *src.Duration != "" {
-		fmt.Fprintf(&b, "- **Duration:** %s\n", *src.Duration)
+	if src.Duration != "" {
+		fmt.Fprintf(&b, "- **Duration:** %s\n", src.Duration)
 	}
 	fmt.Fprintf(&b, "- **Extracted:** %s\n", src.Metadata.ExtractedAt.Format("2006-01-02 15:04"))
-	fmt.Fprintf(&b, "- **Lens:** %s\n\n", lens.LensID)
+	fmt.Fprintf(&b, "- **Lens:** %s\n\n", displayLensName(lens))
 
 	b.WriteString("## Summary\n\n")
 	b.WriteString(strings.TrimSpace(ext.Summary))
@@ -62,7 +71,7 @@ func VaultNote(src *schema.SourceRecord, ext *schema.ExtractionRecord, lens *sch
 		b.WriteString("\n")
 	}
 
-	fmt.Fprintf(&b, "## What Matters for %s\n\n", lensName(lens.LensID))
+	fmt.Fprintf(&b, "## What Matters for %s\n\n", displayLensName(lens))
 	b.WriteString(strings.TrimSpace(lens.Rationale))
 	b.WriteString("\n\n")
 
@@ -106,16 +115,13 @@ func VaultNote(src *schema.SourceRecord, ext *schema.ExtractionRecord, lens *sch
 	return b.String()
 }
 
-func lensName(id string) string {
-	names := map[string]string{
-		"openclaw-product":       "OpenClaw Product",
-		"personal-os":            "Personal OS",
-		"tooling-worth-stealing": "Tooling Worth Stealing",
+// displayLensName prefers the human-readable name from the LensResult and
+// falls back to the lens ID when it's missing (e.g. for older artifacts).
+func displayLensName(lens *schema.LensResult) string {
+	if lens.LensName != "" {
+		return lens.LensName
 	}
-	if n, ok := names[id]; ok {
-		return n
-	}
-	return id
+	return lens.LensID
 }
 
 func yamlString(s string) string {

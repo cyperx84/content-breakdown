@@ -10,13 +10,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"text/template"
 	"time"
 
+	"github.com/cyperx84/content-breakdown/internal/llm"
 	"github.com/cyperx84/content-breakdown/internal/schema"
 )
 
@@ -61,12 +60,11 @@ func Run(src *schema.SourceRecord, ext *schema.ExtractionRecord, lensDef *LensDe
 		fmt.Fprintln(os.Stderr, "[lens] Running lens pass...")
 	}
 
-	var response string
-	if opts.LLMCmd != "" {
-		response, err = callLLMCmd(prompt, opts.LLMCmd, opts.Verbose)
-	} else {
-		response, err = callLLMStdio(prompt, opts.Verbose)
-	}
+	response, err := llm.Call(prompt, llm.Options{
+		LLMCmd:    opts.LLMCmd,
+		Verbose:   opts.Verbose,
+		LogPrefix: "[lens]",
+	})
 	if err != nil {
 		return nil, fmt.Errorf("LLM call: %w", err)
 	}
@@ -79,11 +77,12 @@ func Run(src *schema.SourceRecord, ext *schema.ExtractionRecord, lensDef *LensDe
 	return &schema.LensResult{
 		SourceID:             src.ID,
 		LensID:               lensDef.ID,
+		LensName:             lensDef.Name,
 		RelevanceScore:       output.RelevanceScore,
 		Rationale:            strings.TrimSpace(output.Rationale),
 		RankedIdeas:          output.RankedIdeas,
-		RecommendedArtifacts: uniqueStrings(output.RecommendedArtifacts),
-		IgnoredItems:         uniqueStrings(output.IgnoredItems),
+		RecommendedArtifacts: llm.UniqueStrings(output.RecommendedArtifacts, false),
+		IgnoredItems:         llm.UniqueStrings(output.IgnoredItems, false),
 		Metadata: schema.LensMetadata{
 			GeneratedAt: time.Now(),
 		},
@@ -97,33 +96,37 @@ func buildPrompt(src *schema.SourceRecord, ext *schema.ExtractionRecord, lensDef
 	}
 
 	data := struct {
-		LensName          string
-		LensPurpose       string
-		Questions         []string
-		RankingDimensions []string
-		IgnoreRules       []string
-		Title             string
-		Author            string
-		Summary           string
-		Tools             []string
-		Workflows         []string
-		Opportunities     []string
-		Claims            []string
-		Quotes            []string
+		LensName            string
+		LensPurpose         string
+		Questions           []string
+		RankingDimensions   []string
+		IgnoreRules         []string
+		ProjectContextHints []string
+		ArtifactRules       map[string][]string
+		Title               string
+		Author              string
+		Summary             string
+		Tools               []string
+		Workflows           []string
+		Opportunities       []string
+		Claims              []string
+		Quotes              []string
 	}{
-		LensName:          lensDef.Name,
-		LensPurpose:       lensDef.Purpose,
-		Questions:         lensDef.Questions,
-		RankingDimensions: lensDef.RankingDimensions,
-		IgnoreRules:       lensDef.IgnoreRules,
-		Title:             src.Title,
-		Author:            src.Author,
-		Summary:           ext.Summary,
-		Tools:             ext.Tools,
-		Workflows:         ext.Workflows,
-		Opportunities:     ext.Opportunities,
-		Claims:            ext.Claims,
-		Quotes:            ext.Quotes,
+		LensName:            lensDef.Name,
+		LensPurpose:         lensDef.Purpose,
+		Questions:           lensDef.Questions,
+		RankingDimensions:   lensDef.RankingDimensions,
+		IgnoreRules:         lensDef.IgnoreRules,
+		ProjectContextHints: lensDef.ProjectContextHints,
+		ArtifactRules:       lensDef.ArtifactRules,
+		Title:               src.Title,
+		Author:              src.Author,
+		Summary:             ext.Summary,
+		Tools:               ext.Tools,
+		Workflows:           ext.Workflows,
+		Opportunities:       ext.Opportunities,
+		Claims:              ext.Claims,
+		Quotes:              ext.Quotes,
 	}
 
 	var buf bytes.Buffer
@@ -134,48 +137,8 @@ func buildPrompt(src *schema.SourceRecord, ext *schema.ExtractionRecord, lensDef
 	return buf.String(), nil
 }
 
-func callLLMStdio(prompt string, verbose bool) (string, error) {
-	if verbose {
-		fmt.Fprintln(os.Stderr, "[lens] Awaiting LLM response on stdin...")
-		fmt.Fprintln(os.Stderr, "[lens] Prompt written to stdout.")
-	}
-
-	fmt.Print(prompt)
-
-	var response bytes.Buffer
-	if _, err := io.Copy(&response, os.Stdin); err != nil {
-		return "", fmt.Errorf("read stdin: %w", err)
-	}
-
-	return response.String(), nil
-}
-
-func callLLMCmd(prompt, cmdStr string, verbose bool) (string, error) {
-	if verbose {
-		fmt.Fprintf(os.Stderr, "[lens] Running LLM command: %s\n", cmdStr)
-	}
-
-	parts := strings.Fields(cmdStr)
-	if len(parts) == 0 {
-		return "", fmt.Errorf("empty LLM command")
-	}
-
-	cmd := exec.Command(parts[0], parts[1:]...)
-	cmd.Stdin = strings.NewReader(prompt)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("command failed: %w\nstderr: %s", err, stderr.String())
-	}
-
-	return stdout.String(), nil
-}
-
 func parseResponse(response string) (*LensOutput, error) {
-	cleaned := extractJSONObject(response)
+	cleaned := llm.ExtractJSONObject(response)
 	if cleaned == "" {
 		cleaned = strings.TrimSpace(response)
 	}
@@ -193,39 +156,6 @@ func parseResponse(response string) (*LensOutput, error) {
 	}
 
 	return &output, nil
-}
-
-func extractJSONObject(response string) string {
-	response = strings.TrimSpace(response)
-	response = strings.TrimPrefix(response, "```json")
-	response = strings.TrimPrefix(response, "```")
-	response = strings.TrimSuffix(response, "```")
-	response = strings.TrimSpace(response)
-
-	start := strings.Index(response, "{")
-	end := strings.LastIndex(response, "}")
-	if start == -1 || end == -1 || end < start {
-		return ""
-	}
-	return strings.TrimSpace(response[start : end+1])
-}
-
-func uniqueStrings(items []string) []string {
-	seen := make(map[string]struct{}, len(items))
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		trimmed := strings.TrimSpace(item)
-		if trimmed == "" {
-			continue
-		}
-		key := strings.ToLower(trimmed)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, trimmed)
-	}
-	return out
 }
 
 // LoadLens reads a lens definition from a JSON file.

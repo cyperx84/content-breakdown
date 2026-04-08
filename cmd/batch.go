@@ -1,4 +1,3 @@
-// Package cmd contains CLI commands for the breakdown tool.
 package cmd
 
 import (
@@ -12,10 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/cyperx84/content-breakdown/internal/emit"
-	"github.com/cyperx84/content-breakdown/internal/extract"
 	"github.com/cyperx84/content-breakdown/internal/lens"
-	"github.com/cyperx84/content-breakdown/internal/schema"
-	"github.com/cyperx84/content-breakdown/internal/source"
 )
 
 var batchCmd = &cobra.Command{
@@ -43,6 +39,7 @@ var (
 	batchParallel    int
 	batchSkipErrors  bool
 	batchVerbose     bool
+	batchChunkChars  int
 )
 
 func init() {
@@ -54,6 +51,7 @@ func init() {
 	batchCmd.Flags().IntVar(&batchParallel, "parallel", 1, "Number of sources to process concurrently")
 	batchCmd.Flags().BoolVar(&batchSkipErrors, "skip-errors", false, "Continue on individual source failures")
 	batchCmd.Flags().BoolVar(&batchVerbose, "verbose", false, "Show progress on stderr")
+	batchCmd.Flags().IntVar(&batchChunkChars, "chunk-chars", 0, "Per-chunk transcript character cap (0 = default)")
 }
 
 type batchResult struct {
@@ -77,7 +75,6 @@ func runBatch(cmd *cobra.Command, args []string) error {
 	if lensPath == "" {
 		return fmt.Errorf("lens not found: %s", batchLens)
 	}
-
 	lensDef, err := lens.LoadLens(lensPath)
 	if err != nil {
 		return fmt.Errorf("load lens: %w", err)
@@ -100,7 +97,21 @@ func runBatch(cmd *cobra.Command, args []string) error {
 
 			start := time.Now()
 			r := batchResult{Input: src}
-			r.ArtDir, r.Title, r.Err = processSingle(src, lensDef)
+			res, err := RunPipeline(PipelineOptions{
+				Input:        src,
+				Lens:         lensDef,
+				LLMCmd:       batchLLMCmd,
+				Format:       batchFormat,
+				ArtifactsDir: batchArtifactDir,
+				Verbose:      batchVerbose,
+				ChunkChars:   batchChunkChars,
+			})
+			if err != nil {
+				r.Err = err
+			} else {
+				r.ArtDir = res.ArtifactDir
+				r.Title = res.Source.Title
+			}
 			r.Duration = time.Since(start)
 			results[idx] = r
 
@@ -113,16 +124,13 @@ func runBatch(cmd *cobra.Command, args []string) error {
 	}
 	wg.Wait()
 
-	// Print summary
+	// Print summary (always — even when not skipping errors).
 	ok, failed := 0, 0
 	fmt.Fprintln(os.Stderr, "\n── Batch Summary ─────────────────────")
 	for _, r := range results {
 		if r.Err != nil {
 			failed++
 			fmt.Fprintf(os.Stderr, "  ✗  %s\n     error: %v\n", r.Input, r.Err)
-			if !batchSkipErrors {
-				return fmt.Errorf("batch failed on: %s: %w", r.Input, r.Err)
-			}
 		} else {
 			ok++
 			fmt.Fprintf(os.Stderr, "  ✓  %s\n     → %s  [%.1fs]\n", r.Title, r.ArtDir, r.Duration.Seconds())
@@ -135,61 +143,6 @@ func runBatch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%d source(s) failed", failed)
 	}
 	return nil
-}
-
-func processSingle(input string, lensDef *lens.LensDefinition) (artDir string, title string, err error) {
-	src, err := source.Ingest(input)
-	if err != nil {
-		return "", "", fmt.Errorf("ingest: %w", err)
-	}
-
-	artDir = fmt.Sprintf("%s/%s", batchArtifactDir, generateSlug(src))
-	if err := os.MkdirAll(artDir, 0755); err != nil {
-		return artDir, src.Title, fmt.Errorf("mkdir: %w", err)
-	}
-
-	if err := writeArtifact(artDir+"/source.json", src); err != nil {
-		return artDir, src.Title, err
-	}
-
-	extRecord, err := extract.Run(src, extract.Options{LLMCmd: batchLLMCmd, Verbose: batchVerbose})
-	if err != nil {
-		return artDir, src.Title, fmt.Errorf("extraction: %w", err)
-	}
-	if err := writeArtifact(artDir+"/extraction.json", extRecord); err != nil {
-		return artDir, src.Title, err
-	}
-
-	lensResult, err := lens.Run(src, extRecord, lensDef, lens.Options{LLMCmd: batchLLMCmd, Verbose: batchVerbose})
-	if err != nil {
-		return artDir, src.Title, fmt.Errorf("lens: %w", err)
-	}
-	if err := writeArtifact(artDir+"/lens.json", lensResult); err != nil {
-		return artDir, src.Title, err
-	}
-
-	rendered, err := emit.Render(batchFormat, src, extRecord, lensResult)
-	if err != nil {
-		return artDir, src.Title, fmt.Errorf("render: %w", err)
-	}
-
-	fname := batchFormat + ".md"
-	if batchFormat == emit.FormatVault {
-		fname = "note.md"
-	}
-	if err := os.WriteFile(artDir+"/"+fname, []byte(rendered), 0644); err != nil {
-		return artDir, src.Title, fmt.Errorf("write note: %w", err)
-	}
-
-	manifest := &schema.ArtifactManifest{
-		SourceID:  src.ID,
-		LensID:    lensResult.LensID,
-		Emitted:   []schema.EmittedArtifact{{Type: batchFormat, Path: artDir + "/" + fname}},
-		CreatedAt: time.Now(),
-	}
-	_ = writeArtifact(artDir+"/manifest.json", manifest)
-
-	return artDir, src.Title, nil
 }
 
 func readInputList(args []string) ([]string, error) {

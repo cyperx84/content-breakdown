@@ -1,4 +1,3 @@
-// Package cmd contains CLI commands for the breakdown tool.
 package cmd
 
 import (
@@ -6,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,8 +14,8 @@ import (
 
 var emitCmd = &cobra.Command{
 	Use:   "emit <artifacts-dir>",
-	Short: "Generate vault note from analysis artifacts",
-	Long: `Generate a vault note (markdown) from the analysis artifacts.
+	Short: "Generate output artifacts from analysis artifacts",
+	Long: `Generate a markdown artifact from the analysis artifacts.
 
 Reads source.json, extraction.json, and lens.json from the artifacts
 directory and produces a formatted markdown note.
@@ -52,25 +50,21 @@ func runEmit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	manifest := &schema.ArtifactManifest{
-		SourceID:  src.ID,
-		LensID:    lensResult.LensID,
-		CreatedAt: time.Now(),
-	}
 
-	artifactType := fmt.Sprintf("%s-note", emitFormat)
+	manifest := loadOrInitManifest(artifactDir, src.ID, lensResult.LensID)
+
 	switch {
 	case emitStdout:
 		fmt.Print(rendered)
-		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: artifactType, Path: "stdout"})
+		recordEmittedArtifact(manifest, emitFormat, "stdout")
 	case emitOutput != "":
 		if err := os.WriteFile(emitOutput, []byte(rendered), 0644); err != nil {
 			return fmt.Errorf("write output file: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote: %s\n", emitOutput)
-		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: artifactType, Path: emitOutput})
+		recordEmittedArtifact(manifest, emitFormat, emitOutput)
 	default:
-		defaultName := fmt.Sprintf("%s.md", emitFormat)
+		defaultName := emitFormat + ".md"
 		if emitFormat == emit.FormatVault {
 			defaultName = "note.md"
 		}
@@ -79,14 +73,10 @@ func runEmit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("write output file: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Wrote: %s\n", outPath)
-		manifest.Emitted = append(manifest.Emitted, schema.EmittedArtifact{Type: artifactType, Path: outPath})
+		recordEmittedArtifact(manifest, emitFormat, outPath)
 	}
 
-	if err := writeManifest(artifactDir, manifest); err != nil {
-		return err
-	}
-
-	return nil
+	return writeManifest(artifactDir, manifest)
 }
 
 func loadArtifacts(artifactDir string) (*schema.SourceRecord, *schema.ExtractionRecord, *schema.LensResult, error) {
@@ -124,17 +114,4 @@ func loadArtifacts(artifactDir string) (*schema.SourceRecord, *schema.Extraction
 	}
 
 	return &src, &ext, &lensResult, nil
-}
-
-func writeManifest(artifactDir string, manifest *schema.ArtifactManifest) error {
-	manifestPath := filepath.Join(artifactDir, "manifest.json")
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal manifest: %w", err)
-	}
-	if err := os.WriteFile(manifestPath, data, 0644); err != nil {
-		return fmt.Errorf("write manifest.json: %w", err)
-	}
-	fmt.Fprintf(os.Stderr, "Wrote: %s\n", manifestPath)
-	return nil
 }

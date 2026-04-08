@@ -12,9 +12,9 @@ type SourceRecord struct {
 	Type         string         `json:"type"`
 	CanonicalURL string         `json:"canonicalUrl"`
 	Title        string         `json:"title"`
-	Author       string         `json:"author"`
-	PublishedAt  *string        `json:"publishedAt,omitempty"`
-	Duration     *string        `json:"duration,omitempty"`
+	Author       string         `json:"author,omitempty"`
+	PublishedAt  string         `json:"publishedAt,omitempty"`
+	Duration     string         `json:"duration,omitempty"`
 	Transcript   string         `json:"transcript"`
 	Metadata     SourceMetadata `json:"metadata"`
 }
@@ -48,6 +48,7 @@ type ExtractionMetadata struct {
 type LensResult struct {
 	SourceID             string       `json:"sourceId"`
 	LensID               string       `json:"lensId"`
+	LensName             string       `json:"lensName,omitempty"`
 	RelevanceScore       float64      `json:"relevanceScore"`
 	Rationale            string       `json:"rationale"`
 	RankedIdeas          []RankedIdea `json:"rankedIdeas"`

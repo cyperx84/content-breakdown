@@ -1,4 +1,3 @@
-// Package cmd contains CLI commands for the breakdown tool.
 package cmd
 
 import (
@@ -34,6 +33,7 @@ var (
 	analyzeLLMCmd     string
 	analyzeVerbose    bool
 	analyzeJSONOutput bool
+	analyzeChunkChars int
 )
 
 func init() {
@@ -42,6 +42,7 @@ func init() {
 	analyzeCmd.Flags().StringVar(&analyzeLLMCmd, "llm-cmd", "", "External LLM command (e.g., 'claude -p')")
 	analyzeCmd.Flags().BoolVar(&analyzeVerbose, "verbose", false, "Show progress on stderr")
 	analyzeCmd.Flags().BoolVar(&analyzeJSONOutput, "json", false, "Output LensResult as JSON to stdout")
+	analyzeCmd.Flags().IntVar(&analyzeChunkChars, "chunk-chars", 0, "Per-chunk transcript character cap (0 = default)")
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
@@ -60,71 +61,53 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	}
 
 	// Find lens definition
-	lensPath := findLens(analyzeLens)
-	if lensPath == "" {
+	lensDefPath := findLens(analyzeLens)
+	if lensDefPath == "" {
 		return fmt.Errorf("lens not found: %s (checked ./lenses/ and embedded lenses)", analyzeLens)
 	}
-
-	lensDef, err := lens.LoadLens(lensPath)
+	lensDef, err := lens.LoadLens(lensDefPath)
 	if err != nil {
 		return fmt.Errorf("load lens: %w", err)
 	}
 
-	// Run extraction pass
-	extractOpts := extract.Options{
-		LLMCmd:  analyzeLLMCmd,
-		Verbose: analyzeVerbose,
-	}
-
-	extRecord, err := extract.Run(&src, extractOpts)
+	// Extraction pass
+	extRecord, err := extract.Run(&src, extract.Options{
+		LLMCmd:             analyzeLLMCmd,
+		Verbose:            analyzeVerbose,
+		MaxTranscriptChars: analyzeChunkChars,
+	})
 	if err != nil {
 		return fmt.Errorf("extraction pass: %w", err)
 	}
 
-	// Write extraction.json
-	extPath := filepath.Join(artifactDir, "extraction.json")
-	extData, err := json.MarshalIndent(extRecord, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal extraction record: %w", err)
-	}
-
-	if err := os.WriteFile(extPath, extData, 0644); err != nil {
+	extOutPath := filepath.Join(artifactDir, "extraction.json")
+	if err := writeJSON(extOutPath, extRecord); err != nil {
 		return fmt.Errorf("write extraction.json: %w", err)
 	}
-
 	if analyzeVerbose {
-		fmt.Fprintf(os.Stderr, "[analyze] Wrote: %s\n", extPath)
+		fmt.Fprintf(os.Stderr, "[analyze] Wrote: %s\n", extOutPath)
 	}
 
-	// Run lens pass
-	lensOpts := lens.Options{
+	// Lens pass
+	lensResult, err := lens.Run(&src, extRecord, lensDef, lens.Options{
 		LLMCmd:  analyzeLLMCmd,
 		Verbose: analyzeVerbose,
-	}
-
-	lensResult, err := lens.Run(&src, extRecord, lensDef, lensOpts)
+	})
 	if err != nil {
 		return fmt.Errorf("lens pass: %w", err)
 	}
 
-	// Write lens.json
-	lensPath = filepath.Join(artifactDir, "lens.json")
-	lensData, err := json.MarshalIndent(lensResult, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal lens result: %w", err)
-	}
-
-	if err := os.WriteFile(lensPath, lensData, 0644); err != nil {
+	lensOutPath := filepath.Join(artifactDir, "lens.json")
+	if err := writeJSON(lensOutPath, lensResult); err != nil {
 		return fmt.Errorf("write lens.json: %w", err)
 	}
-
 	if analyzeVerbose {
-		fmt.Fprintf(os.Stderr, "[analyze] Wrote: %s\n", lensPath)
+		fmt.Fprintf(os.Stderr, "[analyze] Wrote: %s\n", lensOutPath)
 	}
 
-	// Output
 	if analyzeJSONOutput {
-		fmt.Println(string(lensData))
+		data, _ := json.MarshalIndent(lensResult, "", "  ")
+		fmt.Println(string(data))
 	} else {
 		fmt.Fprintf(os.Stderr, "Analyzed: %s\n", src.Title)
 		fmt.Fprintf(os.Stderr, "Relevance: %.2f\n", lensResult.RelevanceScore)
@@ -133,20 +116,4 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-func findLens(lensID string) string {
-	// Check ./lenses/<id>.json
-	localPath := filepath.Join("lenses", lensID+".json")
-	if _, err := os.Stat(localPath); err == nil {
-		return localPath
-	}
-
-	// Check ~/.openclaw/lenses/<id>.json
-	homeLensPath := filepath.Join(os.Getenv("HOME"), ".openclaw", "lenses", lensID+".json")
-	if _, err := os.Stat(homeLensPath); err == nil {
-		return homeLensPath
-	}
-
-	return ""
 }

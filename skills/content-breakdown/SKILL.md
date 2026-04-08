@@ -40,6 +40,8 @@ go run . batch urls.txt --llm-cmd "claude --print --permission-mode bypassPermis
 - `personal-os`
 - `tooling-worth-stealing`
 - `founder-research`
+- `coding-agents`
+- `mental-models`
 
 ## Available formats
 
@@ -77,4 +79,5 @@ Only write to vault when explicitly asked.
 - `yt-dlp` on PATH (for YouTube)
 - `pdftotext` on PATH (for PDFs — `brew install poppler`)
 - `claude` on PATH (for `--llm-cmd`)
+- (optional) `lattice` on PATH for the `--think` Mental Models section
 - This skill is intentionally thin; the CLI owns the workflow

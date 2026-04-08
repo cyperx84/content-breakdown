@@ -95,19 +95,35 @@ func TaskList(src *schema.SourceRecord, ext *schema.ExtractionRecord, lens *sche
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Task List — %s\n\n", src.Title)
 	fmt.Fprintf(&b, "Source: %s\n\n", src.CanonicalURL)
-	b.WriteString("## Build Tasks\n\n")
-	for i, item := range topIdeas(lens.RankedIdeas, 6) {
-		fmt.Fprintf(&b, "- [ ] %s\n", item.Title)
-		if item.ImplementationFit != "" {
-			fmt.Fprintf(&b, "  - Fit: %s\n", item.ImplementationFit)
-		}
-		if item.WhyItMatters != "" {
-			fmt.Fprintf(&b, "  - Why: %s\n", item.WhyItMatters)
-		}
-		if i == 2 {
-			b.WriteString("\n## Follow-ups\n\n")
+
+	ideas := topIdeas(lens.RankedIdeas, 6)
+	build := ideas
+	var followups []schema.RankedIdea
+	if len(ideas) > 3 {
+		build = ideas[:3]
+		followups = ideas[3:]
+	}
+
+	writeIdeas := func(items []schema.RankedIdea) {
+		for _, item := range items {
+			fmt.Fprintf(&b, "- [ ] %s\n", item.Title)
+			if item.ImplementationFit != "" {
+				fmt.Fprintf(&b, "  - Fit: %s\n", item.ImplementationFit)
+			}
+			if item.WhyItMatters != "" {
+				fmt.Fprintf(&b, "  - Why: %s\n", item.WhyItMatters)
+			}
 		}
 	}
+
+	b.WriteString("## Build Tasks\n\n")
+	writeIdeas(build)
+
+	if len(followups) > 0 {
+		b.WriteString("\n## Follow-ups\n\n")
+		writeIdeas(followups)
+	}
+
 	if len(lens.RecommendedArtifacts) > 0 {
 		b.WriteString("\n## Artifact Tasks\n\n")
 		for _, a := range lens.RecommendedArtifacts {

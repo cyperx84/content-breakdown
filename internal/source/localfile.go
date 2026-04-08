@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,13 +10,20 @@ import (
 	"time"
 
 	"github.com/cyperx84/content-breakdown/internal/schema"
+	"github.com/cyperx84/content-breakdown/internal/slug"
 )
 
 // LocalFileAdapter ingests plain text, markdown, and PDF files.
 type LocalFileAdapter struct{}
 
+// MinLocalFileChars is the minimum content length accepted from a local file.
+// Files shorter than this are rejected as likely empty / placeholders.
+var MinLocalFileChars = 20
+
+const pdfExtractTimeout = 60 * time.Second
+
 func init() {
-	Register(&LocalFileAdapter{})
+	RegisterWithPriority(&LocalFileAdapter{}, PriorityLow)
 }
 
 func (l *LocalFileAdapter) Detect(input string) bool {
@@ -57,8 +65,8 @@ func (l *LocalFileAdapter) Ingest(path string) (*schema.SourceRecord, error) {
 	}
 
 	text = strings.TrimSpace(text)
-	if len(text) < 50 {
-		return nil, fmt.Errorf("file content too short: %s", path)
+	if len(text) < MinLocalFileChars {
+		return nil, fmt.Errorf("file content too short (<%d chars): %s", MinLocalFileChars, path)
 	}
 
 	title := inferTitle(path, text)
@@ -66,7 +74,7 @@ func (l *LocalFileAdapter) Ingest(path string) (*schema.SourceRecord, error) {
 	abs, _ := filepath.Abs(path)
 
 	return &schema.SourceRecord{
-		ID:           fmt.Sprintf("file_%s", slugify(filepath.Base(path), 32)),
+		ID:           fmt.Sprintf("file_%s", slug.Make(filepath.Base(path), 32)),
 		Type:         localFileType(ext),
 		CanonicalURL: abs,
 		Title:        title,
@@ -83,8 +91,13 @@ func extractPDF(path string) (string, error) {
 	if _, err := exec.LookPath("pdftotext"); err != nil {
 		return "", fmt.Errorf("pdftotext not found — install poppler: brew install poppler")
 	}
-	out, err := exec.Command("pdftotext", "-layout", path, "-").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), pdfExtractTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "pdftotext", "-layout", path, "-").Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("pdftotext timed out after %s on %s", pdfExtractTimeout, path)
+		}
 		return "", fmt.Errorf("pdftotext failed: %w", err)
 	}
 	return string(out), nil
@@ -96,7 +109,6 @@ func inferTitle(path, text string) string {
 	name := strings.TrimSuffix(base, ext)
 	name = strings.ReplaceAll(name, "-", " ")
 	name = strings.ReplaceAll(name, "_", " ")
-	// Capitalise first letter
 	if len(name) > 0 {
 		name = strings.ToUpper(name[:1]) + name[1:]
 	}

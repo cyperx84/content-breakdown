@@ -7,6 +7,8 @@
 package youtube
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +18,11 @@ import (
 	"time"
 
 	"github.com/cyperx84/content-breakdown/internal/schema"
+)
+
+const (
+	metadataTimeout   = 60 * time.Second
+	transcriptTimeout = 180 * time.Second
 )
 
 // Ingest fetches transcript and metadata from a YouTube URL.
@@ -56,33 +63,38 @@ type ytDlpMeta struct {
 }
 
 func fetchMetadata(videoURL string) (*ytDlpMeta, error) {
-	cmd := exec.Command("yt-dlp", "--dump-json", "--no-download", videoURL)
-	out, err := cmd.Output()
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("yt-dlp failed: %w\nstderr: %s", err, string(ee.Stderr))
+	ctx, cancel := context.WithTimeout(context.Background(), metadataTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "yt-dlp", "--dump-json", "--no-download", videoURL)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("yt-dlp metadata timed out after %s", metadataTimeout)
 		}
-		return nil, fmt.Errorf("yt-dlp failed: %w", err)
+		return nil, fmt.Errorf("yt-dlp failed: %w\nstderr: %s", err, stderr.String())
 	}
 
 	var meta ytDlpMeta
-	if err := json.Unmarshal(out, &meta); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &meta); err != nil {
 		return nil, fmt.Errorf("parse metadata: %w", err)
 	}
 	return &meta, nil
 }
 
 func fetchTranscript(videoURL, videoID string) (string, error) {
-	// Create temp dir for subtitle files
 	tmpDir, err := os.MkdirTemp("", "breakdown-yt-"+videoID)
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Download subtitles (prefer manual, fall back to auto-generated)
+	ctx, cancel := context.WithTimeout(context.Background(), transcriptTimeout)
+	defer cancel()
+
 	basePath := filepath.Join(tmpDir, videoID)
-	cmd := exec.Command("yt-dlp",
+	cmd := exec.CommandContext(ctx, "yt-dlp",
 		"--write-subs",
 		"--write-auto-subs",
 		"--sub-lang", "en",
@@ -92,44 +104,33 @@ func fetchTranscript(videoURL, videoID string) (string, error) {
 		videoURL,
 	)
 
-	if _, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("download subtitles: %w", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("yt-dlp transcript timed out after %s", transcriptTimeout)
+		}
+		return "", fmt.Errorf("download subtitles: %w\noutput: %s", err, string(output))
 	}
 
 	// Find the subtitle file (could be .vtt, .srv3, .json3, etc.)
-	files, err := filepath.Glob(filepath.Join(tmpDir, "*.vtt"))
-	if err != nil {
-		return "", fmt.Errorf("glob vtt files: %w", err)
-	}
-
-	// Try .srv3 if no .vtt
+	files, _ := filepath.Glob(filepath.Join(tmpDir, "*.vtt"))
 	if len(files) == 0 {
-		files, err = filepath.Glob(filepath.Join(tmpDir, "*.srv3"))
-		if err != nil {
-			return "", fmt.Errorf("glob srv3 files: %w", err)
-		}
+		files, _ = filepath.Glob(filepath.Join(tmpDir, "*.srv3"))
 	}
-
-	// Try .json3 if no .vtt or .srv3
 	if len(files) == 0 {
-		files, err = filepath.Glob(filepath.Join(tmpDir, "*.json3"))
-		if err != nil {
-			return "", fmt.Errorf("glob json3 files: %w", err)
-		}
+		files, _ = filepath.Glob(filepath.Join(tmpDir, "*.json3"))
 	}
 
 	if len(files) == 0 {
 		return "", fmt.Errorf("no subtitle files found (video may not have captions)")
 	}
 
-	// Read and parse the first subtitle file
 	subFile := files[0]
 	content, err := os.ReadFile(subFile)
 	if err != nil {
 		return "", fmt.Errorf("read subtitle file: %w", err)
 	}
 
-	// Parse based on extension
 	ext := filepath.Ext(subFile)
 	var transcript string
 	switch ext {
@@ -140,7 +141,6 @@ func fetchTranscript(videoURL, videoID string) (string, error) {
 	case ".srv3":
 		transcript = parseSRV3(string(content))
 	default:
-		// Fallback: just strip timestamps
 		transcript = stripTimestamps(string(content))
 	}
 
@@ -195,15 +195,12 @@ func parseJSON3(content []byte) string {
 }
 
 func parseSRV3(content string) string {
-	// SRV3 is XML-based, simplified parsing
 	var lines []string
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
-		// Skip XML tags and empty lines
 		if line == "" || strings.HasPrefix(line, "<") || strings.HasSuffix(line, ">") {
 			continue
 		}
-		// Unescape basic XML entities
 		line = strings.ReplaceAll(line, "&amp;", "&")
 		line = strings.ReplaceAll(line, "&lt;", "<")
 		line = strings.ReplaceAll(line, "&gt;", ">")
@@ -236,19 +233,16 @@ func isNumeric(s string) bool {
 
 func buildSourceRecord(meta *ytDlpMeta, transcript string) *schema.SourceRecord {
 	now := time.Now()
-	var publishedAt *string
+	var publishedAt string
 	if meta.UploadDate != "" {
-		// Parse YYYYMMDD format
 		if t, err := time.Parse("20060102", meta.UploadDate); err == nil {
-			formatted := t.Format("2006-01-02")
-			publishedAt = &formatted
+			publishedAt = t.Format("2006-01-02")
 		}
 	}
 
-	var duration *string
+	var duration string
 	if meta.Duration > 0 {
-		d := fmt.Sprintf("%dm%ds", meta.Duration/60, meta.Duration%60)
-		duration = &d
+		duration = fmt.Sprintf("%dm%ds", meta.Duration/60, meta.Duration%60)
 	}
 
 	return &schema.SourceRecord{
@@ -266,26 +260,4 @@ func buildSourceRecord(meta *ytDlpMeta, transcript string) *schema.SourceRecord 
 			VideoID:     meta.ID,
 		},
 	}
-}
-
-// Slug returns a filesystem-safe slug for the video.
-func Slug(title string) string {
-	s := strings.ToLower(title)
-	s = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == ' ' || r == '-' {
-			return r
-		}
-		return -1
-	}, s)
-	s = strings.ReplaceAll(s, " ", "-")
-	// Collapse multiple hyphens
-	for strings.Contains(s, "--") {
-		s = strings.ReplaceAll(s, "--", "-")
-	}
-	s = strings.Trim(s, "-")
-	if len(s) > 40 {
-		s = s[:40]
-		s = strings.TrimRight(s, "-")
-	}
-	return s
 }

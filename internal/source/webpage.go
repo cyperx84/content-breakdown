@@ -1,7 +1,9 @@
 package source
 
 import (
+	"context"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -11,17 +13,25 @@ import (
 	"unicode"
 
 	"github.com/cyperx84/content-breakdown/internal/schema"
+	"github.com/cyperx84/content-breakdown/internal/slug"
 )
 
 // WebpageAdapter ingests articles and blog posts from HTTP/HTTPS URLs.
 type WebpageAdapter struct {
-	client *http.Client
+	client  *http.Client
+	timeout time.Duration
 }
 
+const (
+	defaultWebpageTimeout = 30 * time.Second
+	maxWebpageBodyBytes   = 5 * 1024 * 1024
+)
+
 func init() {
-	Register(&WebpageAdapter{
-		client: &http.Client{Timeout: 30 * time.Second},
-	})
+	RegisterWithPriority(&WebpageAdapter{
+		client:  &http.Client{Timeout: defaultWebpageTimeout},
+		timeout: defaultWebpageTimeout,
+	}, PriorityMedium)
 }
 
 func (w *WebpageAdapter) Detect(input string) bool {
@@ -29,16 +39,22 @@ func (w *WebpageAdapter) Detect(input string) bool {
 	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
 		return false
 	}
-	// Exclude YouTube — handled by the YouTube adapter
-	return !isYouTubeURL(input)
+	return !IsYouTubeURL(input)
 }
 
 func (w *WebpageAdapter) Ingest(rawURL string) (*schema.SourceRecord, error) {
-	req, err := http.NewRequest("GET", rawURL, nil)
+	timeout := w.timeout
+	if timeout <= 0 {
+		timeout = defaultWebpageTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	req.Header.Set("User-Agent", "breakdown-cli/1.0 (content research tool)")
+	req.Header.Set("User-Agent", "breakdown-cli (content research tool)")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 
 	resp, err := w.client.Do(req)
@@ -51,21 +67,21 @@ func (w *WebpageAdapter) Ingest(rawURL string) (*schema.SourceRecord, error) {
 		return nil, fmt.Errorf("HTTP %d fetching %s", resp.StatusCode, rawURL)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024)) // 5MB cap
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxWebpageBodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	html := string(body)
-	title := extractTitle(html)
-	author := extractAuthor(html)
-	text := htmlToText(html)
+	rawHTML := string(body)
+	title := extractTitle(rawHTML)
+	author := extractAuthor(rawHTML)
+	text := htmlToText(rawHTML)
 
 	if len(strings.TrimSpace(text)) < 100 {
 		return nil, fmt.Errorf("extracted text too short (possible JS-rendered page or paywall): %s", rawURL)
 	}
 
-	canonical := canonicalURL(rawURL, html)
+	canonical := canonicalURL(rawURL, rawHTML)
 	now := time.Now()
 
 	return &schema.SourceRecord{
@@ -95,31 +111,30 @@ var (
 	reNav      = regexp.MustCompile(`(?is)<nav[^>]*>.*?</nav>`)
 	reHeader   = regexp.MustCompile(`(?is)<header[^>]*>.*?</header>`)
 	reFooter   = regexp.MustCompile(`(?is)<footer[^>]*>.*?</footer>`)
-	reEntity   = regexp.MustCompile(`&[a-zA-Z0-9#]{1,10};`)
 	reSpace    = regexp.MustCompile(`[ \t]+`)
 	reNewlines = regexp.MustCompile(`\n{3,}`)
 )
 
-func extractTitle(html string) string {
+func extractTitle(rawHTML string) string {
 	for _, re := range []*regexp.Regexp{reOGTitle, reOGTitleR, reTitle} {
-		if m := re.FindStringSubmatch(html); len(m) > 1 {
-			return strings.TrimSpace(decodeEntities(m[1]))
+		if m := re.FindStringSubmatch(rawHTML); len(m) > 1 {
+			return strings.TrimSpace(html.UnescapeString(m[1]))
 		}
 	}
 	return "Untitled"
 }
 
-func extractAuthor(html string) string {
+func extractAuthor(rawHTML string) string {
 	for _, re := range []*regexp.Regexp{reAuthor, reAuthorR} {
-		if m := re.FindStringSubmatch(html); len(m) > 1 {
-			return strings.TrimSpace(decodeEntities(m[1]))
+		if m := re.FindStringSubmatch(rawHTML); len(m) > 1 {
+			return strings.TrimSpace(html.UnescapeString(m[1]))
 		}
 	}
 	return ""
 }
 
-func canonicalURL(rawURL, html string) string {
-	if m := reCanon.FindStringSubmatch(html); len(m) > 1 {
+func canonicalURL(rawURL, rawHTML string) string {
+	if m := reCanon.FindStringSubmatch(rawHTML); len(m) > 1 {
 		c := strings.TrimSpace(m[1])
 		if strings.HasPrefix(c, "http") {
 			return c
@@ -128,26 +143,26 @@ func canonicalURL(rawURL, html string) string {
 	return rawURL
 }
 
-func htmlToText(html string) string {
+func htmlToText(rawHTML string) string {
 	// Strip noise blocks
-	html = reScript.ReplaceAllString(html, " ")
-	html = reStyle.ReplaceAllString(html, " ")
-	html = reNav.ReplaceAllString(html, " ")
-	html = reHeader.ReplaceAllString(html, " ")
-	html = reFooter.ReplaceAllString(html, " ")
+	rawHTML = reScript.ReplaceAllString(rawHTML, " ")
+	rawHTML = reStyle.ReplaceAllString(rawHTML, " ")
+	rawHTML = reNav.ReplaceAllString(rawHTML, " ")
+	rawHTML = reHeader.ReplaceAllString(rawHTML, " ")
+	rawHTML = reFooter.ReplaceAllString(rawHTML, " ")
 
 	// Block elements → newlines
-	html = regexp.MustCompile(`(?i)<(p|div|h[1-6]|li|br|blockquote|article|section|tr)[^>]{0,100}>`).ReplaceAllString(html, "\n")
-	html = regexp.MustCompile(`(?i)</(p|div|h[1-6]|li|blockquote|article|section|tr)>`).ReplaceAllString(html, "\n")
+	rawHTML = regexp.MustCompile(`(?i)<(p|div|h[1-6]|li|br|blockquote|article|section|tr)[^>]{0,100}>`).ReplaceAllString(rawHTML, "\n")
+	rawHTML = regexp.MustCompile(`(?i)</(p|div|h[1-6]|li|blockquote|article|section|tr)>`).ReplaceAllString(rawHTML, "\n")
 
 	// Strip remaining tags
-	html = reTag.ReplaceAllString(html, "")
+	rawHTML = reTag.ReplaceAllString(rawHTML, "")
 
-	// Decode entities
-	html = decodeEntities(html)
+	// Decode all named + numeric HTML entities via stdlib
+	rawHTML = html.UnescapeString(rawHTML)
 
 	// Normalise whitespace
-	lines := strings.Split(html, "\n")
+	lines := strings.Split(rawHTML, "\n")
 	var kept []string
 	for _, line := range lines {
 		line = reSpace.ReplaceAllString(line, " ")
@@ -159,29 +174,6 @@ func htmlToText(html string) string {
 	text := strings.Join(kept, "\n")
 	text = reNewlines.ReplaceAllString(text, "\n\n")
 	return strings.TrimSpace(text)
-}
-
-func decodeEntities(s string) string {
-	entities := map[string]string{
-		"&amp;":    "&",
-		"&lt;":     "<",
-		"&gt;":     ">",
-		"&quot;":   `"`,
-		"&#39;":    "'",
-		"&apos;":   "'",
-		"&nbsp;":   " ",
-		"&mdash;":  "—",
-		"&ndash;":  "–",
-		"&hellip;": "…",
-	}
-	for enc, dec := range entities {
-		s = strings.ReplaceAll(s, enc, dec)
-	}
-	// Remove remaining numeric entities
-	s = reEntity.ReplaceAllStringFunc(s, func(m string) string {
-		return ""
-	})
-	return s
 }
 
 func isPrintableLine(s string) bool {
@@ -200,35 +192,8 @@ func isPrintableLine(s string) bool {
 func urlID(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return slugify(rawURL, 32)
+		return slug.Make(rawURL, 32)
 	}
 	combined := u.Hostname() + u.Path
-	return slugify(combined, 32)
-}
-
-func slugify(s string, maxLen int) string {
-	s = strings.ToLower(s)
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		} else if b.Len() > 0 {
-			last := rune(b.String()[b.Len()-1])
-			if last != '-' {
-				b.WriteRune('-')
-			}
-		}
-	}
-	result := strings.Trim(b.String(), "-")
-	if len(result) > maxLen {
-		result = result[:maxLen]
-		result = strings.TrimRight(result, "-")
-	}
-	return result
-}
-
-func isYouTubeURL(u string) bool {
-	return strings.Contains(u, "youtube.com/watch") ||
-		strings.Contains(u, "youtu.be/") ||
-		strings.Contains(u, "youtube.com/shorts")
+	return slug.Make(combined, 32)
 }

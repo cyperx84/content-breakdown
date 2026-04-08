@@ -9,15 +9,13 @@ import (
 )
 
 func sampleRecords() (*schema.SourceRecord, *schema.ExtractionRecord, *schema.LensResult) {
-	published := "2026-03-01"
-	duration := "10m0s"
 	src := &schema.SourceRecord{
 		ID:           "src1",
 		CanonicalURL: "https://example.com/video",
 		Title:        "Agent Patterns",
 		Author:       "Chris",
-		PublishedAt:  &published,
-		Duration:     &duration,
+		PublishedAt:  "2026-03-01",
+		Duration:     "10m0s",
 		Metadata:     schema.SourceMetadata{ExtractedAt: time.Date(2026, 3, 14, 9, 0, 0, 0, time.UTC)},
 	}
 	ext := &schema.ExtractionRecord{

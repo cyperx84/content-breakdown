@@ -1,8 +1,14 @@
+// Package cmd contains CLI commands for the breakdown tool.
 package cmd
 
 import (
 	"github.com/spf13/cobra"
 )
+
+// Version is overridable at build time via ldflags:
+//
+//	go build -ldflags "-X github.com/cyperx84/content-breakdown/cmd.Version=$(git describe --tags --always)"
+var Version = "dev"
 
 var rootCmd = &cobra.Command{
 	Use:   "breakdown",

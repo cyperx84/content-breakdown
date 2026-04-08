@@ -22,6 +22,8 @@ Lenses:
 - `personal-os`
 - `tooling-worth-stealing`
 - `founder-research`
+- `coding-agents`
+- `mental-models`
 
 ## Prerequisites
 
@@ -32,6 +34,12 @@ Lenses:
 
 ```bash
 go build -o breakdown .
+```
+
+With version metadata baked in:
+
+```bash
+go build -ldflags "-X github.com/cyperx84/content-breakdown/cmd.Version=$(git describe --tags --always --dirty)" -o breakdown .
 ```
 
 Or install to $GOPATH/bin:
@@ -86,11 +94,13 @@ Full pipeline: ingest → analyze → emit.
 
 Flags:
 - `--lens string` - Lens ID to apply (default: "openclaw-product")
-- `--llm-cmd string` - External LLM command (e.g., 'claude --print --permission-mode bypassPermissions')
+- `--llm-cmd string` - External LLM command (quoted args supported, e.g. `'claude --system-prompt "be concise"'`)
 - `--format string` - Output format: `vault|summary|prd|tasks` (default: `vault`)
-- `--artifacts-dir string` - Artifacts directory (default: ./artifacts/content-breakdown/<slug>/)
+- `--artifacts-dir string` - Base artifacts directory (default: `./artifacts/content-breakdown/`); the per-source slug is appended
 - `--stdout` - Output final note to stdout
 - `--verbose` - Show progress on stderr
+- `--think` - Append a Mental Models section using the optional `lattice` CLI (silently skipped if not on PATH)
+- `--chunk-chars int` - Per-chunk transcript character cap for the extraction LLM (0 = default 80000)
 
 ### `breakdown batch [file]`
 
@@ -106,12 +116,13 @@ cat urls.txt | breakdown batch --skip-errors --parallel 2
 
 Flags:
 - `--lens string` - Lens ID (default: "openclaw-product")
-- `--llm-cmd string` - External LLM command
+- `--llm-cmd string` - External LLM command (quoted args supported)
 - `--format string` - Output format (default: `vault`)
 - `--parallel int` - Concurrent sources (default: 1)
-- `--skip-errors` - Continue on individual failures
+- `--skip-errors` - Continue on individual failures (summary always prints)
 - `--artifacts-dir string` - Base artifacts directory
 - `--verbose` - Show per-source progress
+- `--chunk-chars int` - Per-chunk transcript character cap (0 = default)
 
 ### `breakdown ingest <url-or-file>`
 
@@ -217,10 +228,29 @@ Built-in lenses:
 - `personal-os` - systems and workflows for a personal operating system
 - `tooling-worth-stealing` - concrete product/UX/tooling ideas worth adapting
 - `founder-research` - market/product signals useful for founder decisions
+- `coding-agents` - workflows and patterns for AI coding agents
+- `mental-models` - cognitive frameworks present in or applicable to the content
 
 Custom lenses can be placed in:
 - `./lenses/<id>.json`
 - `~/.openclaw/lenses/<id>.json`
+
+A lens is a JSON file with the following shape:
+
+```json
+{
+  "id": "my-lens",
+  "name": "My Lens",
+  "purpose": "What this lens is for",
+  "questions":         ["Question 1?", "Question 2?"],
+  "rankingDimensions": ["dimension1", "dimension2"],
+  "ignoreRules":       ["what to filter out"],
+  "artifactRules":     {"high": ["PRD seed"], "medium": ["summary note"]},
+  "projectContextHints": ["bias hints for the LLM"]
+}
+```
+
+`questions`, `rankingDimensions`, and `ignoreRules` are required. `artifactRules` and `projectContextHints` are optional and, when present, are passed through to the lens prompt.
 
 ## Development
 

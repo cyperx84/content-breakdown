@@ -8,8 +8,6 @@ import (
 
 func TestSourceRecordJSON(t *testing.T) {
 	now := time.Now()
-	published := "2026-01-15"
-	duration := "10m30s"
 
 	src := SourceRecord{
 		ID:           "yt_abc123",
@@ -17,8 +15,8 @@ func TestSourceRecordJSON(t *testing.T) {
 		CanonicalURL: "https://youtube.com/watch?v=abc123",
 		Title:        "Test Video",
 		Author:       "Test Author",
-		PublishedAt:  &published,
-		Duration:     &duration,
+		PublishedAt:  "2026-01-15",
+		Duration:     "10m30s",
 		Transcript:   "This is a test transcript.",
 		Metadata: SourceMetadata{
 			ExtractedAt: now,
@@ -43,8 +41,11 @@ func TestSourceRecordJSON(t *testing.T) {
 	if got.Title != src.Title {
 		t.Errorf("Title = %q, want %q", got.Title, src.Title)
 	}
-	if got.PublishedAt == nil || *got.PublishedAt != published {
-		t.Errorf("PublishedAt = %v, want %q", got.PublishedAt, published)
+	if got.PublishedAt != src.PublishedAt {
+		t.Errorf("PublishedAt = %q, want %q", got.PublishedAt, src.PublishedAt)
+	}
+	if got.Duration != src.Duration {
+		t.Errorf("Duration = %q, want %q", got.Duration, src.Duration)
 	}
 }
 

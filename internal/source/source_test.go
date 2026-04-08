@@ -1,67 +1,14 @@
 package source
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
-
-func TestSlugify(t *testing.T) {
-	tests := []struct {
-		input    string
-		maxLen   int
-		wantLen  int
-		contains string
-	}{
-		{"Simple Title", 40, 13, "simple-title"},
-		{"Already-lowercase", 40, 17, "already-lowercase"},
-		{"With!@#Special$%Chars", 40, 22, "with-special-chars"},
-		{"Multiple---Dashes", 40, 16, "multiple-dashes"},
-		{"  Leading Trailing  ", 40, 14, "leading-trailing"},
-		{"Very Long Title That Should Be Truncated", 20, 20, "very-long-title-that"},
-		{"ALL CAPS TITLE", 40, 14, "all-caps-title"},
-		{"123 Numbers 456", 40, 15, "123-numbers-456"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.input, func(t *testing.T) {
-			got := slugify(tc.input, tc.maxLen)
-			if len(got) > tc.maxLen {
-				t.Errorf("slug length %d exceeds max %d", len(got), tc.maxLen)
-			}
-			if tc.contains != "" && !contains(got, tc.contains) {
-				t.Errorf("slug %q doesn't contain %q", got, tc.contains)
-			}
-			// Should not start or end with hyphen
-			if len(got) > 0 && (got[0] == '-' || got[len(got)-1] == '-') {
-				t.Errorf("slug %q has leading/trailing hyphen", got)
-			}
-		})
-	}
-}
-
-func TestDecodeEntities(t *testing.T) {
-	tests := []struct {
-		input  string
-		expect string
-	}{
-		{"Hello &amp; World", "Hello & World"},
-		{"&lt;tag&gt;", "<tag>"},
-		{"&quot;quoted&quot;", `"quoted"`},
-		{"&apos;single&apos;", "'single'"},
-		{"&nbsp;space", " space"},
-		{"no entities", "no entities"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.input, func(t *testing.T) {
-			got := decodeEntities(tc.input)
-			if got != tc.expect {
-				t.Errorf("got %q, want %q", got, tc.expect)
-			}
-		})
-	}
-}
 
 func TestIsPrintableLine(t *testing.T) {
 	tests := []struct {
@@ -200,7 +147,7 @@ func TestLocalFileIngestMarkdown(t *testing.T) {
 	if rec.Type != "markdown" {
 		t.Fatalf("type = %q, want markdown", rec.Type)
 	}
-	if len(rec.Transcript) < 50 {
+	if len(rec.Transcript) < MinLocalFileChars {
 		t.Fatalf("transcript too short: %d", len(rec.Transcript))
 	}
 }
@@ -221,19 +168,114 @@ func TestLocalFileTitleFallback(t *testing.T) {
 	}
 }
 
+func TestLocalFileTooShort(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tiny.md")
+	if err := os.WriteFile(path, []byte("hi"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := &LocalFileAdapter{}
+	if _, err := a.Ingest(path); err == nil {
+		t.Fatal("expected too-short error")
+	}
+}
+
 func TestHtmlToText(t *testing.T) {
-	html := `<html><head><title>Test</title><style>body{color:red}</style></head>
+	rawHTML := `<html><head><title>Test</title><style>body{color:red}</style></head>
 <body><nav>nav stuff</nav><h1>Hello World</h1><p>This is a paragraph about interesting things.</p>
 <script>alert('x')</script><footer>footer stuff</footer></body></html>`
-	text := htmlToText(html)
+	text := htmlToText(rawHTML)
 	if text == "" {
 		t.Fatal("htmlToText returned empty string")
 	}
-	if contains(text, "nav stuff") || contains(text, "footer stuff") || contains(text, "alert") {
+	if strings.Contains(text, "nav stuff") || strings.Contains(text, "footer stuff") || strings.Contains(text, "alert") {
 		t.Fatalf("htmlToText should strip nav/footer/script, got: %s", text)
 	}
-	if !contains(text, "Hello World") || !contains(text, "paragraph") {
+	if !strings.Contains(text, "Hello World") || !strings.Contains(text, "paragraph") {
 		t.Fatalf("htmlToText missing expected content: %s", text)
+	}
+}
+
+func TestHtmlToTextDecodesNumericEntities(t *testing.T) {
+	rawHTML := "<p>Caf&#233; &amp; r&#xe9;sum&#233; with &#x2014; dash and &nbsp; nbsp.</p>"
+	got := htmlToText(rawHTML)
+	for _, want := range []string{"Café", "résumé", "& ", "—"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestExtractTitle(t *testing.T) {
+	cases := []struct {
+		name string
+		html string
+		want string
+	}{
+		{
+			name: "og:title preferred",
+			html: `<html><head><title>fallback</title><meta property="og:title" content="OG Title Wins"></head>`,
+			want: "OG Title Wins",
+		},
+		{
+			name: "title fallback",
+			html: `<html><head><title>Plain Title</title></head>`,
+			want: "Plain Title",
+		},
+		{
+			name: "decodes entities",
+			html: `<title>Tom &amp; Jerry &#8212; Cartoon</title>`,
+			want: "Tom & Jerry — Cartoon",
+		},
+		{
+			name: "missing",
+			html: `<html><head></head>`,
+			want: "Untitled",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractTitle(tc.html)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractAuthor(t *testing.T) {
+	cases := []struct {
+		name string
+		html string
+		want string
+	}{
+		{"name first", `<meta name="author" content="Jane Doe">`, "Jane Doe"},
+		{"content first", `<meta content="Jane Doe" name="author">`, "Jane Doe"},
+		{"missing", `<meta name="description" content="x">`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractAuthor(tc.html)
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCanonicalURLPrefersLink(t *testing.T) {
+	html := `<head><link rel="canonical" href="https://example.com/canonical"></head>`
+	got := canonicalURL("https://example.com/raw?x=1", html)
+	if got != "https://example.com/canonical" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCanonicalURLFallbackOnRelative(t *testing.T) {
+	html := `<head><link rel="canonical" href="/relative-path"></head>`
+	got := canonicalURL("https://example.com/raw", html)
+	if got != "https://example.com/raw" {
+		t.Errorf("expected fallback to raw URL, got %q", got)
 	}
 }
 
@@ -276,13 +318,73 @@ func TestDetectLocalFile(t *testing.T) {
 	}
 }
 
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || func() bool {
-		for i := 0; i <= len(s)-len(sub); i++ {
-			if s[i:i+len(sub)] == sub {
-				return true
-			}
+// TestAdapterRegistrationOrder asserts the priority invariant: YouTube must be
+// consulted before the generic webpage adapter, otherwise YouTube URLs would
+// fall through to webpage and lose video-specific handling.
+func TestAdapterRegistrationOrder(t *testing.T) {
+	adapters := Adapters()
+	var ytIdx, webIdx, fileIdx int = -1, -1, -1
+	for i, a := range adapters {
+		switch a.(type) {
+		case *YouTubeAdapter:
+			ytIdx = i
+		case *WebpageAdapter:
+			webIdx = i
+		case *LocalFileAdapter:
+			fileIdx = i
 		}
-		return false
-	}())
+	}
+	if ytIdx == -1 || webIdx == -1 || fileIdx == -1 {
+		t.Fatalf("missing adapter — yt:%d web:%d file:%d", ytIdx, webIdx, fileIdx)
+	}
+	if !(ytIdx < webIdx && webIdx < fileIdx) {
+		t.Fatalf("adapters out of priority order: yt=%d web=%d file=%d", ytIdx, webIdx, fileIdx)
+	}
+}
+
+func TestWebpageIngestEndToEnd(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<html>
+<head>
+<title>Sample Post</title>
+<meta name="author" content="Test Author">
+<link rel="canonical" href="` + "https://canonical.example.com/post" + `">
+</head>
+<body>
+<nav>menu</nav>
+<article>
+<h1>Sample Post Heading</h1>
+<p>This is a long enough body of an article so that the extracted text passes the 100 character minimum threshold.</p>
+<p>Another paragraph with content for clarity and length so the test stays robust.</p>
+</article>
+<footer>copyright</footer>
+</body>
+</html>`))
+	}))
+	defer srv.Close()
+
+	a := &WebpageAdapter{
+		client:  &http.Client{Timeout: 5 * time.Second},
+		timeout: 5 * time.Second,
+	}
+	rec, err := a.Ingest(srv.URL)
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if rec.Title != "Sample Post" {
+		t.Errorf("title = %q", rec.Title)
+	}
+	if rec.Author != "Test Author" {
+		t.Errorf("author = %q", rec.Author)
+	}
+	if rec.CanonicalURL != "https://canonical.example.com/post" {
+		t.Errorf("canonical = %q", rec.CanonicalURL)
+	}
+	if !strings.Contains(rec.Transcript, "Sample Post Heading") {
+		t.Errorf("transcript missing heading: %q", rec.Transcript)
+	}
+	if strings.Contains(rec.Transcript, "menu") || strings.Contains(rec.Transcript, "copyright") {
+		t.Errorf("transcript should drop nav/footer: %q", rec.Transcript)
+	}
 }

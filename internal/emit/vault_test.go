@@ -8,34 +8,45 @@ import (
 	"github.com/cyperx84/content-breakdown/internal/schema"
 )
 
-func TestVaultNoteIncludesQuotedFrontmatterAndMetadata(t *testing.T) {
+func TestVaultNoteIncludesFrontmatterAndMetadata(t *testing.T) {
 	now := time.Date(2026, 3, 14, 10, 30, 0, 0, time.UTC)
-	published := "2026-03-01"
-	duration := "12m5s"
 	note := VaultNote(
 		&schema.SourceRecord{
 			ID:           "yt_123",
 			CanonicalURL: "https://youtube.com/watch?v=123",
 			Title:        `Builder: "Ship it"`,
 			Author:       "CyperX",
-			PublishedAt:  &published,
-			Duration:     &duration,
+			PublishedAt:  "2026-03-01",
+			Duration:     "12m5s",
 			Metadata:     schema.SourceMetadata{ExtractedAt: now},
 		},
 		&schema.ExtractionRecord{Summary: "Summary", Opportunities: []string{"Do X"}},
-		&schema.LensResult{LensID: "openclaw-product", RelevanceScore: 0.8, Rationale: "Useful", RankedIdeas: []schema.RankedIdea{{Title: "Idea", Score: 0.9, Rationale: "Because"}}},
+		&schema.LensResult{LensID: "openclaw-product", LensName: "OpenClaw Product Lens", RelevanceScore: 0.8, Rationale: "Useful", RankedIdeas: []schema.RankedIdea{{Title: "Idea", Score: 0.9, Rationale: "Because"}}},
 	)
 
-	if !strings.Contains(note, `title: "Builder: \"Ship it\" Breakdown"`) {
-		t.Fatalf("expected quoted title in frontmatter:\n%s", note)
+	for _, want := range []string{
+		`title: "Builder: \"Ship it\" Breakdown"`,
+		`author: "CyperX"`,
+		`published: 2026-03-01`,
+		`duration: "12m5s"`,
+		"- **Published:** 2026-03-01",
+		"- **Duration:** 12m5s",
+		"**Rationale:** Because",
+		"What Matters for OpenClaw Product Lens",
+	} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note missing %q\n---\n%s", want, note)
+		}
 	}
-	if !strings.Contains(note, "- **Published:** 2026-03-01") {
-		t.Fatalf("expected published metadata:\n%s", note)
-	}
-	if !strings.Contains(note, "- **Duration:** 12m5s") {
-		t.Fatalf("expected duration metadata:\n%s", note)
-	}
-	if !strings.Contains(note, "**Rationale:** Because") {
-		t.Fatalf("expected idea rationale:\n%s", note)
+}
+
+func TestVaultNoteFallsBackToLensIDWhenNameMissing(t *testing.T) {
+	note := VaultNote(
+		&schema.SourceRecord{Title: "X", Metadata: schema.SourceMetadata{ExtractedAt: time.Now()}},
+		&schema.ExtractionRecord{Summary: "x"},
+		&schema.LensResult{LensID: "personal-os", Rationale: "x"},
+	)
+	if !strings.Contains(note, "What Matters for personal-os") {
+		t.Errorf("expected fallback to lens ID, got:\n%s", note)
 	}
 }

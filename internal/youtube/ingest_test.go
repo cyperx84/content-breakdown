@@ -1,7 +1,6 @@
 package youtube
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -62,62 +61,6 @@ func TestParseJSON3(t *testing.T) {
 	}
 	if !strings.Contains(got, "Next") {
 		t.Error("missing Next")
-	}
-}
-
-func TestSlugEdgeCases(t *testing.T) {
-	tests := []struct {
-		input string
-		check func(string) error
-	}{
-		{
-			input: "Simple Title",
-			check: func(s string) error {
-				if s != "simple-title" {
-					return fmt.Errorf("want simple-title, got %s", s)
-				}
-				return nil
-			},
-		},
-		{
-			input: strings.Repeat("a", 100),
-			check: func(s string) error {
-				if len(s) > 40 {
-					return fmt.Errorf("slug too long: %d", len(s))
-				}
-				if strings.Contains(s, "--") {
-					return fmt.Errorf("double dash in slug")
-				}
-				return nil
-			},
-		},
-		{
-			input: "!@#$%^&*()",
-			check: func(s string) error {
-				if s != "" {
-					return fmt.Errorf("want empty, got %s", s)
-				}
-				return nil
-			},
-		},
-		{
-			input: "",
-			check: func(s string) error {
-				if s != "" {
-					return fmt.Errorf("want empty for empty input, got %s", s)
-				}
-				return nil
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.input, func(t *testing.T) {
-			got := Slug(tc.input)
-			if err := tc.check(got); err != nil {
-				t.Error(err)
-			}
-		})
 	}
 }
 

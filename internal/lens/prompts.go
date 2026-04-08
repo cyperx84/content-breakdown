@@ -19,7 +19,14 @@ RANKING DIMENSIONS:
 IGNORE RULES:
 {{range .IgnoreRules}}- {{.}}
 {{end}}
-
+{{if .ProjectContextHints}}
+PROJECT CONTEXT (use these to bias what counts as relevant):
+{{range .ProjectContextHints}}- {{.}}
+{{end}}{{end}}
+{{if .ArtifactRules}}
+ARTIFACT RULES (recommend artifacts according to the bucket the relevance score lands in):
+{{range $bucket, $items := .ArtifactRules}}- {{$bucket}}: {{range $items}}{{.}}; {{end}}
+{{end}}{{end}}
 EXTRACTED FINDINGS:
 Source: {{.Title}} by {{.Author}}
 

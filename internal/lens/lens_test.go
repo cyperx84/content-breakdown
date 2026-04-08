@@ -114,12 +114,12 @@ func TestParseResponseEdgeCases(t *testing.T) {
 		{
 			name:    "missing required fields",
 			input:   `{}`,
-			wantErr: false, // fields are optional, just zero values
+			wantErr: false,
 		},
 		{
 			name:    "negative relevance",
 			input:   `{"relevanceScore": -0.5, "rationale": "test", "rankedIdeas": []}`,
-			wantErr: false, // no validation on score range
+			wantErr: false,
 		},
 	}
 
@@ -144,12 +144,16 @@ func TestParseResponseEdgeCases(t *testing.T) {
 
 func TestBuildPromptIncludesAllFields(t *testing.T) {
 	lensDef := &LensDefinition{
-		ID:                "test-lens",
-		Name:              "Test Lens",
-		Purpose:           "Test purpose",
-		Questions:         []string{"Q1?", "Q2?"},
-		RankingDimensions: []string{"dim1", "dim2"},
-		IgnoreRules:       []string{"ignore X", "ignore Y"},
+		ID:                  "test-lens",
+		Name:                "Test Lens",
+		Purpose:             "Test purpose",
+		Questions:           []string{"Q1?", "Q2?"},
+		RankingDimensions:   []string{"dim1", "dim2"},
+		IgnoreRules:         []string{"ignore X", "ignore Y"},
+		ProjectContextHints: []string{"hint-one", "hint-two"},
+		ArtifactRules: map[string][]string{
+			"high": {"write PRD"},
+		},
 	}
 
 	src := &schema.SourceRecord{
@@ -172,13 +176,14 @@ func TestBuildPromptIncludesAllFields(t *testing.T) {
 		t.Fatalf("buildPrompt error: %v", err)
 	}
 
-	// Verify all key elements are in the prompt
 	mustContain := []string{
 		lensDef.Name,
 		lensDef.Purpose,
 		lensDef.Questions[0],
 		lensDef.RankingDimensions[0],
 		lensDef.IgnoreRules[0],
+		lensDef.ProjectContextHints[0],
+		"write PRD",
 		src.Title,
 		src.Author,
 		ext.Summary,
@@ -195,67 +200,6 @@ func TestBuildPromptIncludesAllFields(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q", want)
 		}
-	}
-}
-
-func TestExtractJSONObject(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		wantJSON bool
-	}{
-		{"simple", `{"a":1}`, true},
-		{"with text", `prefix {"a":1} suffix`, true},
-		{"code fence", "```json\n{\"a\":1}\n```", true},
-		{"no object", "no json", false},
-		{"empty", "", false},
-		{"just brace", "{", false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := extractJSONObject(tc.input)
-			if tc.wantJSON && got == "" {
-				t.Error("expected JSON, got empty")
-			}
-			if !tc.wantJSON && got != "" {
-				t.Errorf("expected empty, got %q", got)
-			}
-		})
-	}
-}
-
-func TestUniqueStrings(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  []string
-		expect []string
-	}{
-		{"nil", nil, nil},
-		{"empty", []string{}, nil},
-		{"single", []string{"a"}, []string{"a"}},
-		{"duplicates", []string{"a", "A", "a "}, []string{"a"}},
-		{"mixed", []string{"b", "a", "c"}, []string{"a", "b", "c"}},
-		{"with empty", []string{"a", "", "b"}, []string{"a", "b"}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := uniqueStrings(tc.input)
-			if len(got) != len(tc.expect) {
-				t.Fatalf("expected %d, got %d: %v", len(tc.expect), len(got), got)
-			}
-			// Check they contain the same elements (order may differ)
-			gotMap := make(map[string]bool)
-			for _, s := range got {
-				gotMap[s] = true
-			}
-			for _, e := range tc.expect {
-				if !gotMap[e] {
-					t.Errorf("missing expected element %q in result %v", e, got)
-				}
-			}
-		})
 	}
 }
 

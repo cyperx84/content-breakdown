@@ -1,4 +1,3 @@
-// Package cmd contains CLI commands for the breakdown tool.
 package cmd
 
 import (
@@ -6,15 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/cyperx84/content-breakdown/internal/schema"
 	"github.com/cyperx84/content-breakdown/internal/source"
-	_ "github.com/cyperx84/content-breakdown/internal/source" // register all adapters
-	"github.com/cyperx84/content-breakdown/internal/youtube"
 )
 
 var ingestCmd = &cobra.Command{
@@ -40,7 +34,7 @@ var (
 
 func init() {
 	rootCmd.AddCommand(ingestCmd)
-	ingestCmd.Flags().StringVar(&ingestArtifactsDir, "artifacts-dir", "", "Artifacts directory (default: ./artifacts/content-breakdown/<slug>/)")
+	ingestCmd.Flags().StringVar(&ingestArtifactsDir, "artifacts-dir", "", "Base artifacts directory (default: ./artifacts/content-breakdown/)")
 	ingestCmd.Flags().BoolVar(&ingestJSONOutput, "json", false, "Output SourceRecord as JSON to stdout")
 }
 
@@ -52,10 +46,11 @@ func runIngest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ingest failed: %w", err)
 	}
 
-	artifactDir := ingestArtifactsDir
-	if artifactDir == "" {
-		artifactDir = filepath.Join("artifacts", "content-breakdown", generateSlug(record))
+	baseDir := ingestArtifactsDir
+	if baseDir == "" {
+		baseDir = filepath.Join("artifacts", "content-breakdown")
 	}
+	artifactDir := filepath.Join(baseDir, generateSlug(record))
 
 	if err := os.MkdirAll(artifactDir, 0755); err != nil {
 		return fmt.Errorf("create artifacts dir: %w", err)
@@ -66,7 +61,6 @@ func runIngest(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("marshal source record: %w", err)
 	}
-
 	if err := os.WriteFile(sourcePath, data, 0644); err != nil {
 		return fmt.Errorf("write source.json: %w", err)
 	}
@@ -80,29 +74,4 @@ func runIngest(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-func generateSlug(record *schema.SourceRecord) string {
-	date := time.Now().Format("2006-01-02")
-	titleSlug := titleToSlug(record.Title)
-	return fmt.Sprintf("%s_%s", date, titleSlug)
-}
-
-func titleToSlug(title string) string {
-	// Reuse youtube.Slug logic for any title
-	return youtube.Slug(title)
-}
-
-// isYouTubeURL is kept for use in cmd/run.go compatibility
-func isYouTubeURL(u string) bool {
-	return containsAny(u, "youtube.com/watch", "youtu.be/", "youtube.com/shorts")
-}
-
-func containsAny(s string, substrs ...string) bool {
-	for _, substr := range substrs {
-		if strings.Contains(s, substr) {
-			return true
-		}
-	}
-	return false
 }

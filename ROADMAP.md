@@ -11,13 +11,13 @@ Built as phased, always-working slices.
 - thin OpenClaw skill wrapper
 - real end-to-end validation
 
-## Phase 2 — Better Outputs 🚧
+## Phase 2 — Better Outputs ✅
 - multiple emit formats from same artifacts
   - vault
   - summary
   - PRD seed
   - task list
-- richer manifest metadata
+- richer manifest metadata (manifest now accumulates across re-emits)
 - Obsidian-friendly output conventions
 - tests for renderers
 

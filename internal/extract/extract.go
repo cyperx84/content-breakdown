@@ -6,25 +6,24 @@
 // The LLM call is stdin/stdout based for keyless operation:
 // - Prompt is written to stdout
 // - LLM response is read from stdin
-// - Or use --llm-cmd to pipe through an external command
+// - Or use LLMCmd to pipe through an external command
 package extract
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
-	"sort"
 	"strings"
 	"text/template"
 	"time"
 
+	"github.com/cyperx84/content-breakdown/internal/llm"
 	"github.com/cyperx84/content-breakdown/internal/schema"
 )
 
-const maxTranscriptChars = 80000
+// DefaultMaxTranscriptChars is used when Options.MaxTranscriptChars is zero.
+const DefaultMaxTranscriptChars = 80000
 
 // Options configures the extraction pass.
 type Options struct {
@@ -34,6 +33,10 @@ type Options struct {
 
 	// Verbose prints progress to stderr.
 	Verbose bool
+
+	// MaxTranscriptChars caps per-chunk transcript length before calling the LLM.
+	// Zero uses DefaultMaxTranscriptChars.
+	MaxTranscriptChars int
 }
 
 // ExtractionOutput is the LLM response structure.
@@ -53,8 +56,27 @@ func Run(src *schema.SourceRecord, opts Options) (*schema.ExtractionRecord, erro
 		return nil, fmt.Errorf("empty transcript")
 	}
 
-	chunks := chunkTranscript(transcript, maxTranscriptChars)
+	maxChars := opts.MaxTranscriptChars
+	if maxChars <= 0 {
+		maxChars = DefaultMaxTranscriptChars
+	}
+
+	chunks := chunkTranscript(transcript, maxChars)
+
+	if opts.Verbose {
+		if len(chunks) > 1 {
+			fmt.Fprintf(os.Stderr, "[extract] Running extraction pass (%d chunks)...\n", len(chunks))
+		} else {
+			fmt.Fprintln(os.Stderr, "[extract] Running extraction pass...")
+		}
+	}
+
 	outputs := make([]*ExtractionOutput, 0, len(chunks))
+	llmOpts := llm.Options{
+		LLMCmd:    opts.LLMCmd,
+		Verbose:   opts.Verbose,
+		LogPrefix: "[extract]",
+	}
 
 	for i, chunk := range chunks {
 		if opts.Verbose && len(chunks) > 1 {
@@ -66,7 +88,7 @@ func Run(src *schema.SourceRecord, opts Options) (*schema.ExtractionRecord, erro
 			return nil, fmt.Errorf("build prompt: %w", err)
 		}
 
-		response, err := callLLM(prompt, opts)
+		response, err := llm.Call(prompt, llmOpts)
 		if err != nil {
 			return nil, fmt.Errorf("LLM call: %w", err)
 		}
@@ -118,59 +140,8 @@ func buildPrompt(src *schema.SourceRecord, transcript string) (string, error) {
 	return buf.String(), nil
 }
 
-func callLLM(prompt string, opts Options) (string, error) {
-	if opts.Verbose {
-		fmt.Fprintln(os.Stderr, "[extract] Running extraction pass...")
-	}
-
-	if opts.LLMCmd != "" {
-		return callLLMCmd(prompt, opts.LLMCmd, opts.Verbose)
-	}
-	return callLLMStdio(prompt, opts.Verbose)
-}
-
-func callLLMStdio(prompt string, verbose bool) (string, error) {
-	if verbose {
-		fmt.Fprintln(os.Stderr, "[extract] Awaiting LLM response on stdin...")
-		fmt.Fprintln(os.Stderr, "[extract] Prompt written to stdout.")
-	}
-
-	fmt.Print(prompt)
-
-	var response bytes.Buffer
-	if _, err := io.Copy(&response, os.Stdin); err != nil {
-		return "", fmt.Errorf("read stdin: %w", err)
-	}
-
-	return response.String(), nil
-}
-
-func callLLMCmd(prompt, cmdStr string, verbose bool) (string, error) {
-	if verbose {
-		fmt.Fprintf(os.Stderr, "[extract] Running LLM command: %s\n", cmdStr)
-	}
-
-	parts := strings.Fields(cmdStr)
-	if len(parts) == 0 {
-		return "", fmt.Errorf("empty LLM command")
-	}
-
-	cmd := exec.Command(parts[0], parts[1:]...)
-	cmd.Stdin = strings.NewReader(prompt)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("command failed: %w\nstderr: %s", err, stderr.String())
-	}
-
-	return stdout.String(), nil
-}
-
 func parseResponse(response string) (*ExtractionOutput, error) {
-	cleaned := extractJSONObject(response)
+	cleaned := llm.ExtractJSONObject(response)
 	if cleaned == "" {
 		cleaned = strings.TrimSpace(response)
 	}
@@ -181,11 +152,11 @@ func parseResponse(response string) (*ExtractionOutput, error) {
 	}
 
 	output.Summary = strings.TrimSpace(output.Summary)
-	output.Tools = uniqueStrings(output.Tools)
-	output.Workflows = uniqueStrings(output.Workflows)
-	output.Opportunities = uniqueStrings(output.Opportunities)
-	output.Claims = uniqueStrings(output.Claims)
-	output.Quotes = uniqueStrings(output.Quotes)
+	output.Tools = llm.UniqueStrings(output.Tools, true)
+	output.Workflows = llm.UniqueStrings(output.Workflows, true)
+	output.Opportunities = llm.UniqueStrings(output.Opportunities, true)
+	output.Claims = llm.UniqueStrings(output.Claims, true)
+	output.Quotes = llm.UniqueStrings(output.Quotes, true)
 
 	return &output, nil
 }
@@ -248,44 +219,10 @@ func mergeOutputs(outputs []*ExtractionOutput) *ExtractionOutput {
 
 	return &ExtractionOutput{
 		Summary:       strings.Join(summaries, "\n\n"),
-		Tools:         uniqueStrings(tools),
-		Workflows:     uniqueStrings(workflows),
-		Opportunities: uniqueStrings(opportunities),
-		Claims:        uniqueStrings(claims),
-		Quotes:        uniqueStrings(quotes),
+		Tools:         llm.UniqueStrings(tools, true),
+		Workflows:     llm.UniqueStrings(workflows, true),
+		Opportunities: llm.UniqueStrings(opportunities, true),
+		Claims:        llm.UniqueStrings(claims, true),
+		Quotes:        llm.UniqueStrings(quotes, true),
 	}
-}
-
-func uniqueStrings(items []string) []string {
-	seen := make(map[string]struct{}, len(items))
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		trimmed := strings.TrimSpace(item)
-		if trimmed == "" {
-			continue
-		}
-		key := strings.ToLower(trimmed)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, trimmed)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func extractJSONObject(response string) string {
-	response = strings.TrimSpace(response)
-	response = strings.TrimPrefix(response, "```json")
-	response = strings.TrimPrefix(response, "```")
-	response = strings.TrimSuffix(response, "```")
-	response = strings.TrimSpace(response)
-
-	start := strings.Index(response, "{")
-	end := strings.LastIndex(response, "}")
-	if start == -1 || end == -1 || end < start {
-		return ""
-	}
-	return strings.TrimSpace(response[start : end+1])
 }

@@ -7,7 +7,9 @@ package source
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/cyperx84/content-breakdown/internal/schema"
 )
@@ -20,12 +22,61 @@ type Adapter interface {
 	Ingest(input string) (*schema.SourceRecord, error)
 }
 
-// registry is the ordered list of registered adapters.
-var registry []Adapter
+// Priority values control the order in which adapters are consulted by
+// Ingest. Higher values run first. The built-in adapters use:
+//
+//	PriorityHigh   = YouTube (must check before the generic webpage adapter)
+//	PriorityMedium = Webpage
+//	PriorityLow    = LocalFile (catch-all)
+const (
+	PriorityHigh   = 100
+	PriorityMedium = 50
+	PriorityLow    = 10
+)
 
-// Register adds an adapter to the registry.
+type registered struct {
+	priority int
+	seq      int // tie-breaker preserving registration order
+	adapter  Adapter
+}
+
+var (
+	registryMu sync.RWMutex
+	registry   []registered
+	nextSeq    int
+)
+
+// Register adds an adapter at PriorityMedium. Kept for backwards compatibility.
 func Register(a Adapter) {
-	registry = append(registry, a)
+	RegisterWithPriority(a, PriorityMedium)
+}
+
+// RegisterWithPriority adds an adapter to the registry at the given priority.
+// Higher priorities are consulted first. Within the same priority, registration
+// order is preserved.
+func RegisterWithPriority(a Adapter, priority int) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	registry = append(registry, registered{priority: priority, seq: nextSeq, adapter: a})
+	nextSeq++
+	sort.SliceStable(registry, func(i, j int) bool {
+		if registry[i].priority != registry[j].priority {
+			return registry[i].priority > registry[j].priority
+		}
+		return registry[i].seq < registry[j].seq
+	})
+}
+
+// Adapters returns a copy of the current adapter list in resolution order.
+// Exposed for tests.
+func Adapters() []Adapter {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	out := make([]Adapter, len(registry))
+	for i, r := range registry {
+		out[i] = r.adapter
+	}
+	return out
 }
 
 // Ingest routes the input to the correct adapter and returns a SourceRecord.
@@ -34,7 +85,7 @@ func Ingest(input string) (*schema.SourceRecord, error) {
 	if input == "" {
 		return nil, fmt.Errorf("empty input")
 	}
-	for _, a := range registry {
+	for _, a := range Adapters() {
 		if a.Detect(input) {
 			return a.Ingest(input)
 		}
@@ -42,12 +93,10 @@ func Ingest(input string) (*schema.SourceRecord, error) {
 	return nil, fmt.Errorf("no adapter found for input: %s", input)
 }
 
-// DetectedType returns the adapter name for the input, or "" if none match.
-func DetectedType(input string) string {
-	for _, a := range registry {
-		if a.Detect(input) {
-			return fmt.Sprintf("%T", a)
-		}
-	}
-	return ""
+// IsYouTubeURL reports whether the input looks like a YouTube URL.
+// Exported so multiple adapters can share the same detection.
+func IsYouTubeURL(u string) bool {
+	return strings.Contains(u, "youtube.com/watch") ||
+		strings.Contains(u, "youtu.be/") ||
+		strings.Contains(u, "youtube.com/shorts")
 }
